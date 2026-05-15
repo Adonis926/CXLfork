@@ -9,7 +9,10 @@ CXL_PHYS=${CXL_PHYS:-0x484000000}
 CXL_SIZE=${CXL_SIZE:-0xfb000000}
 KEY=${KEY:-73}
 KEY2=${KEY2:-74}
+KEY3=${KEY3:-75}
 LENGTH=${LENGTH:-4194304}
+SCAN_REGIONS=${SCAN_REGIONS:-8}
+SCAN_LENGTH=${SCAN_LENGTH:-1048576}
 
 vm0() {
   "${WS}/scripts/ssh-vm0.sh" "$@"
@@ -30,6 +33,7 @@ copy_to_vm() {
     "${SRC}/mitosis_cxl.ko" \
     "${SRC}/mitosis_cxl_parent" \
     "${SRC}/mitosis_cxl_child" \
+    "${SRC}/mitosis_cxl_runtime" \
     ubuntu@localhost:"${VM_DIR}/"
 }
 
@@ -63,3 +67,10 @@ vm0 "cd '${VM_DIR}' && sudo ./mitosis_cxl_parent '${KEY2}' '${LENGTH}'"
 echo "[extra] VM1 restores both handler keys by descriptor lookup"
 vm1 "cd '${VM_DIR}' && sudo ./mitosis_cxl_child '${KEY}'"
 vm1 "cd '${VM_DIR}' && sudo ./mitosis_cxl_child '${KEY2}'"
+
+echo "[extra] VM0 runtime scans /proc/self/maps into a multi-VMA descriptor"
+vm0 "cd '${VM_DIR}' && sudo ./mitosis_cxl_runtime prepare '${KEY3}' '${SCAN_REGIONS}' '${SCAN_LENGTH}'"
+
+echo "[extra] VM1 runtime restores scanned VMAs and verifies private writes"
+vm1 "cd '${VM_DIR}' && sudo ./mitosis_cxl_runtime resume '${KEY3}' --write-private"
+vm1 "cd '${VM_DIR}' && sudo ./mitosis_cxl_runtime resume '${KEY3}'"
