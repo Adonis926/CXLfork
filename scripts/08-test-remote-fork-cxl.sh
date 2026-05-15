@@ -11,6 +11,7 @@ KEY=${KEY:-73}
 KEY2=${KEY2:-74}
 KEY3=${KEY3:-75}
 KEY4=${KEY4:-76}
+KEY5=${KEY5:-78}
 LENGTH=${LENGTH:-4194304}
 SCAN_REGIONS=${SCAN_REGIONS:-8}
 SCAN_LENGTH=${SCAN_LENGTH:-1048576}
@@ -38,6 +39,7 @@ copy_to_vm() {
     "${SRC}/mitosis_cxl_runtime" \
     "${SRC}/mitosis_cxl_pid_target" \
     "${SRC}/mitosis_cxl_pid_prepare" \
+    "${SRC}/mitosis_cxl_fork_demo" \
     ubuntu@localhost:"${VM_DIR}/"
 }
 
@@ -88,3 +90,9 @@ vm0 "cd '${VM_DIR}' && sudo kill \$(cat pid-target.pid)"
 echo "[extra] VM1 restores the pid checkpoint descriptor"
 vm1 "cd '${VM_DIR}' && sudo ./mitosis_cxl_runtime resume '${KEY4}' --write-private"
 vm1 "cd '${VM_DIR}' && sudo ./mitosis_cxl_runtime resume '${KEY4}'"
+
+echo "[extra] VM0 stores fork-like process state with a resume entry"
+vm0 "cd '${VM_DIR}' && sudo ./mitosis_cxl_fork_demo prepare '${KEY5}'"
+
+echo "[extra] VM1 resumes through the stored child entry"
+vm1 "cd '${VM_DIR}' && sudo ./mitosis_cxl_fork_demo resume '${KEY5}'"
