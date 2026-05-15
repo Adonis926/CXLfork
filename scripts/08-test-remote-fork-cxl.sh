@@ -10,9 +10,11 @@ CXL_SIZE=${CXL_SIZE:-0xfb000000}
 KEY=${KEY:-73}
 KEY2=${KEY2:-74}
 KEY3=${KEY3:-75}
+KEY4=${KEY4:-76}
 LENGTH=${LENGTH:-4194304}
 SCAN_REGIONS=${SCAN_REGIONS:-8}
 SCAN_LENGTH=${SCAN_LENGTH:-1048576}
+PID_BASE=${PID_BASE:-0x720000000000}
 
 vm0() {
   "${WS}/scripts/ssh-vm0.sh" "$@"
@@ -34,6 +36,8 @@ copy_to_vm() {
     "${SRC}/mitosis_cxl_parent" \
     "${SRC}/mitosis_cxl_child" \
     "${SRC}/mitosis_cxl_runtime" \
+    "${SRC}/mitosis_cxl_pid_target" \
+    "${SRC}/mitosis_cxl_pid_prepare" \
     ubuntu@localhost:"${VM_DIR}/"
 }
 
@@ -74,3 +78,13 @@ vm0 "cd '${VM_DIR}' && sudo ./mitosis_cxl_runtime prepare '${KEY3}' '${SCAN_REGI
 echo "[extra] VM1 runtime restores scanned VMAs and verifies private writes"
 vm1 "cd '${VM_DIR}' && sudo ./mitosis_cxl_runtime resume '${KEY3}' --write-private"
 vm1 "cd '${VM_DIR}' && sudo ./mitosis_cxl_runtime resume '${KEY3}'"
+
+echo "[extra] VM0 checkpoints another process by pid"
+vm0 "cd '${VM_DIR}' && rm -f pid-target.log pid-target.pid && setsid -f sudo ./mitosis_cxl_pid_target '${KEY4}' '${SCAN_REGIONS}' '${SCAN_LENGTH}' '${PID_BASE}' > pid-target.log 2>&1 < /dev/null"
+vm0 "cd '${VM_DIR}' && for i in \$(seq 1 20); do grep -q 'pid_target pid=' pid-target.log 2>/dev/null && break; sleep 0.2; done; cat pid-target.log; sed -n 's/.*pid=\\([0-9][0-9]*\\).*/\\1/p' pid-target.log > pid-target.pid"
+vm0 "cd '${VM_DIR}' && sudo ./mitosis_cxl_pid_prepare '${KEY4}' \$(cat pid-target.pid) '${SCAN_REGIONS}' '${SCAN_LENGTH}' '${PID_BASE}'"
+vm0 "cd '${VM_DIR}' && sudo kill \$(cat pid-target.pid)"
+
+echo "[extra] VM1 restores the pid checkpoint descriptor"
+vm1 "cd '${VM_DIR}' && sudo ./mitosis_cxl_runtime resume '${KEY4}' --write-private"
+vm1 "cd '${VM_DIR}' && sudo ./mitosis_cxl_runtime resume '${KEY4}'"
