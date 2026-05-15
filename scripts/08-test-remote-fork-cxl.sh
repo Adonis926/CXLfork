@@ -32,23 +32,26 @@ copy_to_vm() {
     ubuntu@localhost:"${VM_DIR}/"
 }
 
-echo "[1/6] building remote-fork CXL sample"
+echo "[1/7] building remote-fork CXL sample"
 make -C "${SRC}" KDIR="${KDIR}" KBUILD_MODPOST_WARN=1
 
-echo "[2/6] preparing VM directories"
+echo "[2/7] preparing VM directories"
 vm0 "mkdir -p '${VM_DIR}'"
 vm1 "mkdir -p '${VM_DIR}'"
 
-echo "[3/6] copying module and test binaries"
+echo "[3/7] copying module and test binaries"
 copy_to_vm 2200
 copy_to_vm 2201
 
-echo "[4/6] loading mitosis_cxl module"
+echo "[4/7] loading mitosis_cxl module"
 vm0 "cd '${VM_DIR}' && sudo rmmod mitosis_cxl 2>/dev/null || true; sudo insmod '${VM_DIR}/mitosis_cxl.ko' cxl_phys='${CXL_PHYS}' cxl_size='${CXL_SIZE}'"
 vm1 "cd '${VM_DIR}' && sudo rmmod mitosis_cxl 2>/dev/null || true; sudo insmod '${VM_DIR}/mitosis_cxl.ko' cxl_phys='${CXL_PHYS}' cxl_size='${CXL_SIZE}'"
 
-echo "[5/6] VM0 prepare into shared CXL memory"
+echo "[5/7] VM0 prepare into shared CXL memory, then mutate parent memory"
 vm0 "cd '${VM_DIR}' && sudo ./mitosis_cxl_parent '${KEY}' '${LENGTH}'"
 
-echo "[6/6] VM1 resume and verify via lazy page faults"
+echo "[6/7] VM1 resume, verify snapshot, and write local private pages"
+vm1 "cd '${VM_DIR}' && sudo ./mitosis_cxl_child '${KEY}' --write-private"
+
+echo "[7/7] VM1 second resume verifies CXL snapshot was not modified by child writes"
 vm1 "cd '${VM_DIR}' && sudo ./mitosis_cxl_child '${KEY}'"
