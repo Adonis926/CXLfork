@@ -98,8 +98,8 @@ vm1 "cd '${VM_DIR}' && sudo ./mitosis_cxl_runtime resume '${KEY4}'"
 echo "[extra] VM0 stores fork-like process state with a resume entry"
 vm0 "cd '${VM_DIR}' && sudo ./mitosis_cxl_fork_demo prepare '${KEY5}'"
 
-echo "[extra] VM1 resumes through the stored child entry"
-vm1 "cd '${VM_DIR}' && sudo ./mitosis_cxl_fork_demo resume '${KEY5}'"
+echo "[extra] VM1 resumes through the stored child entry from kernel ioctl return"
+vm1 "cd '${VM_DIR}' && sudo ./mitosis_cxl_fork_demo resume-kernel '${KEY5}'"
 
 echo "[extra] VM0 serializes real ptrace register state into CXL"
 vm0 "cd '${VM_DIR}' && sudo ./mitosis_cxl_regs_demo capture '${KEY6}'"
