@@ -82,7 +82,7 @@ echo "[extra] VM0 runtime scans /proc/self/maps into a multi-VMA descriptor"
 vm0 "cd '${VM_DIR}' && sudo ./mitosis_cxl_runtime prepare '${KEY3}' '${SCAN_REGIONS}' '${SCAN_LENGTH}'"
 
 echo "[extra] VM1 runtime restores scanned VMAs and verifies private writes"
-vm1 "cd '${VM_DIR}' && sudo ./mitosis_cxl_runtime resume '${KEY3}' --write-private"
+vm1 "cd '${VM_DIR}' && sudo ./mitosis_cxl_runtime apply '${KEY3}' --write-private"
 vm1 "cd '${VM_DIR}' && sudo ./mitosis_cxl_runtime resume '${KEY3}'"
 
 echo "[extra] VM0 checkpoints another process by pid"
@@ -92,7 +92,7 @@ vm0 "cd '${VM_DIR}' && sudo ./mitosis_cxl_pid_prepare '${KEY4}' \$(cat pid-targe
 vm0 "cd '${VM_DIR}' && sudo kill \$(cat pid-target.pid)"
 
 echo "[extra] VM1 restores the pid checkpoint descriptor"
-vm1 "cd '${VM_DIR}' && sudo ./mitosis_cxl_runtime resume '${KEY4}' --write-private"
+vm1 "cd '${VM_DIR}' && sudo ./mitosis_cxl_runtime apply '${KEY4}' --write-private"
 vm1 "cd '${VM_DIR}' && sudo ./mitosis_cxl_runtime resume '${KEY4}'"
 
 echo "[extra] VM0 stores fork-like process state with a resume entry"
