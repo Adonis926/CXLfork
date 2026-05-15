@@ -8,6 +8,7 @@ VM_DIR=${VM_DIR:-/tmp/mitosis-cxl}
 CXL_PHYS=${CXL_PHYS:-0x484000000}
 CXL_SIZE=${CXL_SIZE:-0xfb000000}
 KEY=${KEY:-73}
+KEY2=${KEY2:-74}
 LENGTH=${LENGTH:-4194304}
 
 vm0() {
@@ -55,3 +56,10 @@ vm1 "cd '${VM_DIR}' && sudo ./mitosis_cxl_child '${KEY}' --write-private"
 
 echo "[7/7] VM1 second resume verifies CXL snapshot was not modified by child writes"
 vm1 "cd '${VM_DIR}' && sudo ./mitosis_cxl_child '${KEY}'"
+
+echo "[extra] VM0 prepares a second handler key into a separate descriptor slot"
+vm0 "cd '${VM_DIR}' && sudo ./mitosis_cxl_parent '${KEY2}' '${LENGTH}'"
+
+echo "[extra] VM1 restores both handler keys by descriptor lookup"
+vm1 "cd '${VM_DIR}' && sudo ./mitosis_cxl_child '${KEY}'"
+vm1 "cd '${VM_DIR}' && sudo ./mitosis_cxl_child '${KEY2}'"
