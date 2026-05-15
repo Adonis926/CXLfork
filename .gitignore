@@ -1,0 +1,12 @@
+images/
+cxl/
+logs/
+pids/
+sockets/
+cloudinit/
+kernel/linux-*.tar.*
+kernel/linux
+kernel/build-*/
+*.qcow2
+*.img
+*.log
