@@ -12,6 +12,7 @@ KEY2=${KEY2:-74}
 KEY3=${KEY3:-75}
 KEY4=${KEY4:-76}
 KEY5=${KEY5:-78}
+KEY6=${KEY6:-79}
 LENGTH=${LENGTH:-4194304}
 SCAN_REGIONS=${SCAN_REGIONS:-8}
 SCAN_LENGTH=${SCAN_LENGTH:-1048576}
@@ -40,6 +41,7 @@ copy_to_vm() {
     "${SRC}/mitosis_cxl_pid_target" \
     "${SRC}/mitosis_cxl_pid_prepare" \
     "${SRC}/mitosis_cxl_fork_demo" \
+    "${SRC}/mitosis_cxl_regs_demo" \
     ubuntu@localhost:"${VM_DIR}/"
 }
 
@@ -96,3 +98,9 @@ vm0 "cd '${VM_DIR}' && sudo ./mitosis_cxl_fork_demo prepare '${KEY5}'"
 
 echo "[extra] VM1 resumes through the stored child entry"
 vm1 "cd '${VM_DIR}' && sudo ./mitosis_cxl_fork_demo resume '${KEY5}'"
+
+echo "[extra] VM0 serializes real ptrace register state into CXL"
+vm0 "cd '${VM_DIR}' && sudo ./mitosis_cxl_regs_demo capture '${KEY6}'"
+
+echo "[extra] VM1 restores real ptrace register state into a tracee"
+vm1 "cd '${VM_DIR}' && sudo ./mitosis_cxl_regs_demo restore '${KEY6}'"
