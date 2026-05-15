@@ -4,6 +4,7 @@ set -euo pipefail
 WS=${WS:-/home/xtl/cxlfork-ws}
 KDIR=${KDIR:-${WS}/kernel/build-6.6.32}
 SRC=${SRC:-${WS}/kernel/linux-6.6.32/samples/cxlfork}
+DRV=${DRV:-${WS}/kernel/linux-6.6.32/drivers/cxlfork}
 VM_DIR=${VM_DIR:-/tmp/mitosis-cxl}
 CXL_PHYS=${CXL_PHYS:-0x484000000}
 CXL_SIZE=${CXL_SIZE:-0xfb000000}
@@ -34,7 +35,7 @@ copy_to_vm() {
     -o UserKnownHostsFile=/dev/null \
     -i ~/.ssh/id_ed25519 \
     -P "${port}" \
-    "${SRC}/mitosis_cxl.ko" \
+    "${DRV}/cxlfork_mitosis.ko" \
     "${SRC}/mitosis_cxl_parent" \
     "${SRC}/mitosis_cxl_child" \
     "${SRC}/mitosis_cxl_runtime" \
@@ -46,6 +47,7 @@ copy_to_vm() {
 }
 
 echo "[1/7] building remote-fork CXL sample"
+make -C "${WS}/kernel/build-6.6.32" M="${DRV}" CONFIG_CXLFORK=m CONFIG_CXLFORK_MITOSIS=m KBUILD_MODPOST_WARN=1 modules
 make -C "${SRC}" KDIR="${KDIR}" KBUILD_MODPOST_WARN=1
 
 echo "[2/7] preparing VM directories"
@@ -57,8 +59,8 @@ copy_to_vm 2200
 copy_to_vm 2201
 
 echo "[4/7] loading mitosis_cxl module"
-vm0 "cd '${VM_DIR}' && sudo rmmod mitosis_cxl 2>/dev/null || true; sudo insmod '${VM_DIR}/mitosis_cxl.ko' cxl_phys='${CXL_PHYS}' cxl_size='${CXL_SIZE}'"
-vm1 "cd '${VM_DIR}' && sudo rmmod mitosis_cxl 2>/dev/null || true; sudo insmod '${VM_DIR}/mitosis_cxl.ko' cxl_phys='${CXL_PHYS}' cxl_size='${CXL_SIZE}'"
+vm0 "cd '${VM_DIR}' && sudo rmmod cxlfork_mitosis 2>/dev/null || true; sudo rmmod mitosis_cxl 2>/dev/null || true; sudo insmod '${VM_DIR}/cxlfork_mitosis.ko' cxl_phys='${CXL_PHYS}' cxl_size='${CXL_SIZE}'"
+vm1 "cd '${VM_DIR}' && sudo rmmod cxlfork_mitosis 2>/dev/null || true; sudo rmmod mitosis_cxl 2>/dev/null || true; sudo insmod '${VM_DIR}/cxlfork_mitosis.ko' cxl_phys='${CXL_PHYS}' cxl_size='${CXL_SIZE}'"
 
 echo "[5/7] VM0 prepare into shared CXL memory, then mutate parent memory"
 vm0 "cd '${VM_DIR}' && sudo ./mitosis_cxl_parent '${KEY}' '${LENGTH}'"
