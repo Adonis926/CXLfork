@@ -15,6 +15,7 @@ KEY4=${KEY4:-76}
 KEY5=${KEY5:-78}
 KEY6=${KEY6:-79}
 KEY7=${KEY7:-91}
+KEY8=${KEY8:-92}
 LENGTH=${LENGTH:-4194304}
 SCAN_REGIONS=${SCAN_REGIONS:-8}
 SCAN_LENGTH=${SCAN_LENGTH:-1048576}
@@ -46,6 +47,7 @@ copy_to_vm() {
     "${SRC}/mitosis_cxl_regs_demo" \
     "${SRC}/mitosis_cxl_latency" \
     "${SRC}/mitosis_cxl_real_resume" \
+    "${SRC}/mitosis_cxl_thread_resume" \
     ubuntu@localhost:"${VM_DIR}/"
 }
 
@@ -115,3 +117,6 @@ vm0 "cd '${VM_DIR}' && sudo ./mitosis_cxl_latency 90 '${SCAN_REGIONS}' '${SCAN_L
 
 echo "[extra] VM0 real-resumes into checkpointed user registers"
 vm0 "cd '${VM_DIR}' && sudo ./mitosis_cxl_real_resume '${KEY7}'"
+
+echo "[extra] VM0 restores a non-main thread register frame"
+vm0 "cd '${VM_DIR}' && sudo ./mitosis_cxl_thread_resume '${KEY8}'"
