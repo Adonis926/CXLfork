@@ -55,3 +55,6 @@ timeout 20 "${WS}/scripts/ssh-vm0.sh" "cd '${VM_DIR}' && sudo timeout 10 ./mitos
 
 echo "[6/6] VM1 invokes through lean skeleton runtime"
 timeout 120 "${WS}/scripts/ssh-vm1.sh" "cd '${VM_DIR}' && sudo timeout 90 ./mitosis_cxl_lean_bench invoke '${KEY}' '${ITERS}' '${WARMUP}' '${DATA_LEN}'"
+
+echo "[extra] VM1 invokes through precreated lean skeleton pool"
+timeout 120 "${WS}/scripts/ssh-vm1.sh" "cd '${VM_DIR}' && sudo timeout 90 ./mitosis_cxl_lean_bench pool '${KEY}' '${ITERS}' '${WARMUP}' '${DATA_LEN}'"
