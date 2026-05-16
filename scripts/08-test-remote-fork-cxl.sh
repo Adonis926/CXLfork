@@ -60,8 +60,8 @@ copy_to_vm 2200
 copy_to_vm 2201
 
 echo "[4/7] loading mitosis_cxl module"
-vm0 "cd '${VM_DIR}' && sudo rmmod cxlfork_mitosis 2>/dev/null || true; sudo rmmod mitosis_cxl 2>/dev/null || true; sudo insmod '${VM_DIR}/cxlfork_mitosis.ko' cxl_phys='${CXL_PHYS}' cxl_size='${CXL_SIZE}'"
-vm1 "cd '${VM_DIR}' && sudo rmmod cxlfork_mitosis 2>/dev/null || true; sudo rmmod mitosis_cxl 2>/dev/null || true; sudo insmod '${VM_DIR}/cxlfork_mitosis.ko' cxl_phys='${CXL_PHYS}' cxl_size='${CXL_SIZE}'"
+vm0 "cd '${VM_DIR}' && sudo rmmod cxlfork_mitosis 2>/dev/null || true; sudo rmmod mitosis_cxl 2>/dev/null || true; sudo insmod '${VM_DIR}/cxlfork_mitosis.ko' cxl_phys='${CXL_PHYS}' cxl_size='${CXL_SIZE}' || lsmod | grep -q '^cxlfork_mitosis '"
+vm1 "cd '${VM_DIR}' && sudo rmmod cxlfork_mitosis 2>/dev/null || true; sudo rmmod mitosis_cxl 2>/dev/null || true; sudo insmod '${VM_DIR}/cxlfork_mitosis.ko' cxl_phys='${CXL_PHYS}' cxl_size='${CXL_SIZE}' || lsmod | grep -q '^cxlfork_mitosis '"
 
 echo "[5/7] VM0 prepare into shared CXL memory, then mutate parent memory"
 vm0 "cd '${VM_DIR}' && sudo ./mitosis_cxl_parent '${KEY}' '${LENGTH}'"
