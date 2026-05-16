@@ -19,6 +19,7 @@ KEY8=${KEY8:-92}
 KEY9=${KEY9:-93}
 KEY10=${KEY10:-194}
 KEY11=${KEY11:-90}
+KEY12=${KEY12:-195}
 LENGTH=${LENGTH:-4194304}
 SCAN_REGIONS=${SCAN_REGIONS:-8}
 SCAN_LENGTH=${SCAN_LENGTH:-1048576}
@@ -49,6 +50,7 @@ copy_to_vm() {
     "${SRC}/mitosis_cxl_fork_demo" \
     "${SRC}/mitosis_cxl_regs_demo" \
     "${SRC}/mitosis_cxl_latency" \
+    "${SRC}/mitosis_cxl_forkctl" \
     "${SRC}/mitosis_cxl_real_resume" \
     "${SRC}/mitosis_cxl_fd_resume" \
     "${SRC}/mitosis_cxl_thread_resume" \
@@ -61,8 +63,8 @@ make -C "${WS}/kernel/build-6.6.32" M="${DRV}" CONFIG_CXLFORK=m CONFIG_CXLFORK_M
 make -C "${SRC}" KDIR="${KDIR}" KBUILD_MODPOST_WARN=1
 
 echo "[2/7] preparing VM directories"
-vm0 "mkdir -p '${VM_DIR}'"
-vm1 "mkdir -p '${VM_DIR}'"
+vm0 "sudo pkill -x mitosis_cxl_pid_target 2>/dev/null || true; mkdir -p '${VM_DIR}'"
+vm1 "sudo pkill -x mitosis_cxl_pid_target 2>/dev/null || true; mkdir -p '${VM_DIR}'"
 
 echo "[3/7] copying module and test binaries"
 copy_to_vm 2200
@@ -119,6 +121,13 @@ vm1 "cd '${VM_DIR}' && sudo ./mitosis_cxl_regs_demo restore '${KEY6}'"
 
 echo "[extra] VM0 measures same-node Mitosis-style lazy-shadow fork latency"
 vm0 "cd '${VM_DIR}' && sudo ./mitosis_cxl_latency 90 '${SCAN_REGIONS}' '${SCAN_LENGTH}'"
+
+echo "[extra] VM0/VM1 exercise stable fork_prepare/fork_resume/fork_release API"
+vm0 "cd '${VM_DIR}' && rm -f forkctl-target.log forkctl-target.pid && setsid -f sudo ./mitosis_cxl_pid_target '${KEY12}' '${SCAN_REGIONS}' '${SCAN_LENGTH}' '${PID_BASE}' > forkctl-target.log 2>&1 < /dev/null"
+vm0 "cd '${VM_DIR}' && for i in \$(seq 1 20); do grep -q 'pid_target pid=' forkctl-target.log 2>/dev/null && break; sleep 0.2; done; cat forkctl-target.log; sed -n 's/.*pid=\\([0-9][0-9]*\\).*/\\1/p' forkctl-target.log > forkctl-target.pid"
+vm0 "cd '${VM_DIR}' && sudo ./mitosis_cxl_forkctl prepare '${KEY12}' \$(cat forkctl-target.pid) '${PID_BASE}' \$(( ${PID_BASE} + ${SCAN_REGIONS} * 0x200000000 + ${SCAN_LENGTH} ))"
+vm1 "cd '${VM_DIR}' && sudo ./mitosis_cxl_forkctl resume '${KEY12}' --touch"
+vm0 "cd '${VM_DIR}' && sudo ./mitosis_cxl_forkctl release '${KEY12}' && sudo kill \$(cat forkctl-target.pid)"
 
 echo "[extra] VM0 real-resumes into checkpointed user registers"
 vm0 "cd '${VM_DIR}' && sudo ./mitosis_cxl_real_resume '${KEY7}'"
