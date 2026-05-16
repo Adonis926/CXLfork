@@ -20,6 +20,8 @@ KEY9=${KEY9:-93}
 KEY10=${KEY10:-194}
 KEY11=${KEY11:-90}
 KEY12=${KEY12:-195}
+KEY13=${KEY13:-196}
+KEY14=${KEY14:-197}
 LENGTH=${LENGTH:-4194304}
 SCAN_REGIONS=${SCAN_REGIONS:-8}
 SCAN_LENGTH=${SCAN_LENGTH:-1048576}
@@ -51,6 +53,7 @@ copy_to_vm() {
     "${SRC}/mitosis_cxl_regs_demo" \
     "${SRC}/mitosis_cxl_latency" \
     "${SRC}/mitosis_cxl_forkctl" \
+    "${SRC}/mitosis_cxl_fault_bench" \
     "${SRC}/mitosis_cxl_real_resume" \
     "${SRC}/mitosis_cxl_fd_resume" \
     "${SRC}/mitosis_cxl_thread_resume" \
@@ -128,6 +131,20 @@ vm0 "cd '${VM_DIR}' && for i in \$(seq 1 20); do grep -q 'pid_target pid=' forkc
 vm0 "cd '${VM_DIR}' && sudo ./mitosis_cxl_forkctl prepare '${KEY12}' \$(cat forkctl-target.pid) '${PID_BASE}' \$(( ${PID_BASE} + ${SCAN_REGIONS} * 0x200000000 + ${SCAN_LENGTH} ))"
 vm1 "cd '${VM_DIR}' && sudo ./mitosis_cxl_forkctl resume '${KEY12}' --touch"
 vm0 "cd '${VM_DIR}' && sudo ./mitosis_cxl_forkctl release '${KEY12}' && sudo kill \$(cat forkctl-target.pid)"
+
+echo "[extra] VM1 benchmarks single-thread remote page fault latency"
+vm0 "cd '${VM_DIR}' && rm -f faultbench-target.log faultbench-target.pid && setsid -f sudo ./mitosis_cxl_pid_target '${KEY13}' '${SCAN_REGIONS}' '${SCAN_LENGTH}' '${PID_BASE}' > faultbench-target.log 2>&1 < /dev/null"
+vm0 "cd '${VM_DIR}' && for i in \$(seq 1 20); do grep -q 'pid_target pid=' faultbench-target.log 2>/dev/null && break; sleep 0.2; done; cat faultbench-target.log; sed -n 's/.*pid=\\([0-9][0-9]*\\).*/\\1/p' faultbench-target.log > faultbench-target.pid"
+vm0 "cd '${VM_DIR}' && sudo ./mitosis_cxl_forkctl prepare '${KEY13}' \$(cat faultbench-target.pid) '${PID_BASE}' \$(( ${PID_BASE} + ${SCAN_REGIONS} * 0x200000000 + ${SCAN_LENGTH} ))"
+vm1 "cd '${VM_DIR}' && sudo ./mitosis_cxl_fault_bench '${KEY13}' 1"
+vm0 "cd '${VM_DIR}' && sudo ./mitosis_cxl_forkctl release '${KEY13}' && sudo kill \$(cat faultbench-target.pid)"
+
+echo "[extra] VM1 benchmarks concurrent remote page fault latency"
+vm0 "cd '${VM_DIR}' && rm -f faultbench-target.log faultbench-target.pid && setsid -f sudo ./mitosis_cxl_pid_target '${KEY14}' '${SCAN_REGIONS}' '${SCAN_LENGTH}' '${PID_BASE}' > faultbench-target.log 2>&1 < /dev/null"
+vm0 "cd '${VM_DIR}' && for i in \$(seq 1 20); do grep -q 'pid_target pid=' faultbench-target.log 2>/dev/null && break; sleep 0.2; done; cat faultbench-target.log; sed -n 's/.*pid=\\([0-9][0-9]*\\).*/\\1/p' faultbench-target.log > faultbench-target.pid"
+vm0 "cd '${VM_DIR}' && sudo ./mitosis_cxl_forkctl prepare '${KEY14}' \$(cat faultbench-target.pid) '${PID_BASE}' \$(( ${PID_BASE} + ${SCAN_REGIONS} * 0x200000000 + ${SCAN_LENGTH} ))"
+vm1 "cd '${VM_DIR}' && sudo ./mitosis_cxl_fault_bench '${KEY14}' 4"
+vm0 "cd '${VM_DIR}' && sudo ./mitosis_cxl_forkctl release '${KEY14}' && sudo kill \$(cat faultbench-target.pid)"
 
 echo "[extra] VM0 real-resumes into checkpointed user registers"
 vm0 "cd '${VM_DIR}' && sudo ./mitosis_cxl_real_resume '${KEY7}'"
