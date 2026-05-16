@@ -128,8 +128,22 @@ timeout 20 "${WS}/scripts/ssh-vm0.sh" "cd '${VM_DIR}' && sudo timeout 10 ./mitos
 echo "[extra] VM1 resumes VM0 checkpointed registers with CXL remote paging"
 timeout 20 "${WS}/scripts/ssh-vm1.sh" "cd '${VM_DIR}' && sudo timeout 10 ./mitosis_cxl_real_resume resume '${KEY10}'"
 
+
+echo "[extra] VM0 prepares a cross-VM non-main thread checkpoint"
+timeout 20 "${WS}/scripts/ssh-vm0.sh" "cd '${VM_DIR}' && sudo timeout 10 ./mitosis_cxl_thread_resume prepare '${KEY8}'" || true
+
+echo "[extra] VM1 resumes VM0 non-main thread registers with CXL remote paging"
+timeout 20 "${WS}/scripts/ssh-vm1.sh" "cd '${VM_DIR}' && sudo timeout 10 ./mitosis_cxl_thread_resume resume '${KEY8}'"
+
 echo "[extra] VM0 restores a non-main thread register frame"
 vm0 "cd '${VM_DIR}' && sudo ./mitosis_cxl_thread_resume '${KEY8}'"
+
+
+echo "[extra] VM0 prepares a cross-VM pthread TLS checkpoint"
+timeout 20 "${WS}/scripts/ssh-vm0.sh" "cd '${VM_DIR}' && sudo timeout 10 ./mitosis_cxl_pthread_resume prepare '${KEY9}'" || true
+
+echo "[extra] VM1 resumes VM0 pthread TLS threads with CXL remote paging"
+timeout 20 "${WS}/scripts/ssh-vm1.sh" "cd '${VM_DIR}' && sudo timeout 10 ./mitosis_cxl_pthread_resume resume '${KEY9}'"
 
 echo "[extra] VM0 restores pthread TLS and a non-main thread frame"
 vm0 "cd '${VM_DIR}' && sudo ./mitosis_cxl_pthread_resume '${KEY9}'"
