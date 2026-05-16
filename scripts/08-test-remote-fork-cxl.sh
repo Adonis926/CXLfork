@@ -43,6 +43,7 @@ copy_to_vm() {
     "${SRC}/mitosis_cxl_pid_prepare" \
     "${SRC}/mitosis_cxl_fork_demo" \
     "${SRC}/mitosis_cxl_regs_demo" \
+    "${SRC}/mitosis_cxl_latency" \
     ubuntu@localhost:"${VM_DIR}/"
 }
 
@@ -106,3 +107,6 @@ vm0 "cd '${VM_DIR}' && sudo ./mitosis_cxl_regs_demo capture '${KEY6}'"
 
 echo "[extra] VM1 restores real ptrace register state into a tracee"
 vm1 "cd '${VM_DIR}' && sudo ./mitosis_cxl_regs_demo restore '${KEY6}'"
+
+echo "[extra] VM0 measures same-node Mitosis-style lazy-shadow fork latency"
+vm0 "cd '${VM_DIR}' && sudo ./mitosis_cxl_latency 90 '${SCAN_REGIONS}' '${SCAN_LENGTH}'"
