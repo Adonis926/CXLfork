@@ -22,6 +22,7 @@ KEY11=${KEY11:-90}
 KEY12=${KEY12:-195}
 KEY13=${KEY13:-196}
 KEY14=${KEY14:-197}
+KEY15=${KEY15:-198}
 LENGTH=${LENGTH:-4194304}
 SCAN_REGIONS=${SCAN_REGIONS:-8}
 SCAN_LENGTH=${SCAN_LENGTH:-1048576}
@@ -58,6 +59,7 @@ copy_to_vm() {
     "${SRC}/mitosis_cxl_fd_resume" \
     "${SRC}/mitosis_cxl_thread_resume" \
     "${SRC}/mitosis_cxl_pthread_resume" \
+    "${SRC}/mitosis_cxl_os_state_resume" \
     ubuntu@localhost:"${VM_DIR}/"
 }
 
@@ -164,6 +166,13 @@ timeout 20 "${WS}/scripts/ssh-vm0.sh" "cd '${VM_DIR}' && sudo timeout 10 ./mitos
 
 echo "[extra] VM1 restores regular-file fd state from CXL"
 timeout 20 "${WS}/scripts/ssh-vm1.sh" "cd '${VM_DIR}' && sudo timeout 10 ./mitosis_cxl_fd_resume resume '${KEY11}'"
+
+echo "[extra] VM0 prepares cross-VM fd alias and fs_struct state"
+vm1 "mkdir -p '${VM_DIR}/osstate-${KEY15}' && printf '0123456789abcdef\n' > '${VM_DIR}/osstate-${KEY15}/state.txt'"
+timeout 20 "${WS}/scripts/ssh-vm0.sh" "cd '${VM_DIR}' && sudo timeout 10 ./mitosis_cxl_os_state_resume prepare '${KEY15}'" || true
+
+echo "[extra] VM1 restores fd alias graph, cwd, and umask state"
+timeout 20 "${WS}/scripts/ssh-vm1.sh" "cd '${VM_DIR}' && sudo timeout 10 ./mitosis_cxl_os_state_resume resume '${KEY15}'"
 
 echo "[extra] VM0 prepares a cross-VM non-main thread checkpoint"
 timeout 20 "${WS}/scripts/ssh-vm0.sh" "cd '${VM_DIR}' && sudo timeout 10 ./mitosis_cxl_thread_resume prepare '${KEY8}'" || true
