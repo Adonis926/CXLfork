@@ -79,6 +79,9 @@ echo "[4/7] loading mitosis_cxl module"
 vm0 "cd '${VM_DIR}' && sudo rmmod cxlfork_mitosis 2>/dev/null || true; sudo rmmod mitosis_cxl 2>/dev/null || true; sudo insmod '${VM_DIR}/cxlfork_mitosis.ko' cxl_phys='${CXL_PHYS}' cxl_size='${CXL_SIZE}' || lsmod | grep -q '^cxlfork_mitosis '"
 vm1 "cd '${VM_DIR}' && sudo rmmod cxlfork_mitosis 2>/dev/null || true; sudo rmmod mitosis_cxl 2>/dev/null || true; sudo insmod '${VM_DIR}/cxlfork_mitosis.ko' cxl_phys='${CXL_PHYS}' cxl_size='${CXL_SIZE}' || lsmod | grep -q '^cxlfork_mitosis '"
 
+echo "[4.5/7] clearing stale CXL fork descriptors"
+vm0 "cd '${VM_DIR}' && for k in '${KEY}' '${KEY2}' '${KEY3}' '${KEY4}' '${KEY5}' '${KEY6}' '${KEY7}' '${KEY8}' '${KEY9}' '${KEY10}' '${KEY11}' '${KEY12}' '${KEY13}' '${KEY14}' '${KEY15}' 199 200 201 210; do sudo ./mitosis_cxl_forkctl release \"\${k}\" 2>/dev/null || true; done"
+
 echo "[5/7] VM0 prepare into shared CXL memory, then mutate parent memory"
 vm0 "cd '${VM_DIR}' && sudo ./mitosis_cxl_parent '${KEY}' '${LENGTH}'"
 
