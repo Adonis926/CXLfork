@@ -17,6 +17,7 @@ KEY6=${KEY6:-79}
 KEY7=${KEY7:-91}
 KEY8=${KEY8:-92}
 KEY9=${KEY9:-93}
+KEY10=${KEY10:-194}
 LENGTH=${LENGTH:-4194304}
 SCAN_REGIONS=${SCAN_REGIONS:-8}
 SCAN_LENGTH=${SCAN_LENGTH:-1048576}
@@ -119,6 +120,13 @@ vm0 "cd '${VM_DIR}' && sudo ./mitosis_cxl_latency 90 '${SCAN_REGIONS}' '${SCAN_L
 
 echo "[extra] VM0 real-resumes into checkpointed user registers"
 vm0 "cd '${VM_DIR}' && sudo ./mitosis_cxl_real_resume '${KEY7}'"
+
+
+echo "[extra] VM0 prepares a cross-VM real-resume checkpoint"
+timeout 20 "${WS}/scripts/ssh-vm0.sh" "cd '${VM_DIR}' && sudo timeout 10 ./mitosis_cxl_real_resume prepare '${KEY10}'" || true
+
+echo "[extra] VM1 resumes VM0 checkpointed registers with CXL remote paging"
+timeout 20 "${WS}/scripts/ssh-vm1.sh" "cd '${VM_DIR}' && sudo timeout 10 ./mitosis_cxl_real_resume resume '${KEY10}'"
 
 echo "[extra] VM0 restores a non-main thread register frame"
 vm0 "cd '${VM_DIR}' && sudo ./mitosis_cxl_thread_resume '${KEY8}'"
