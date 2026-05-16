@@ -18,6 +18,7 @@ KEY7=${KEY7:-91}
 KEY8=${KEY8:-92}
 KEY9=${KEY9:-93}
 KEY10=${KEY10:-194}
+KEY11=${KEY11:-90}
 LENGTH=${LENGTH:-4194304}
 SCAN_REGIONS=${SCAN_REGIONS:-8}
 SCAN_LENGTH=${SCAN_LENGTH:-1048576}
@@ -49,6 +50,7 @@ copy_to_vm() {
     "${SRC}/mitosis_cxl_regs_demo" \
     "${SRC}/mitosis_cxl_latency" \
     "${SRC}/mitosis_cxl_real_resume" \
+    "${SRC}/mitosis_cxl_fd_resume" \
     "${SRC}/mitosis_cxl_thread_resume" \
     "${SRC}/mitosis_cxl_pthread_resume" \
     ubuntu@localhost:"${VM_DIR}/"
@@ -128,6 +130,14 @@ timeout 20 "${WS}/scripts/ssh-vm0.sh" "cd '${VM_DIR}' && sudo timeout 10 ./mitos
 echo "[extra] VM1 resumes VM0 checkpointed registers with CXL remote paging"
 timeout 20 "${WS}/scripts/ssh-vm1.sh" "cd '${VM_DIR}' && sudo timeout 10 ./mitosis_cxl_real_resume resume '${KEY10}'"
 
+
+
+echo "[extra] VM0 prepares a cross-VM fd checkpoint"
+vm1 "echo mitosis-cxl-fd-ok > '${VM_DIR}/fd-${KEY11}.txt'"
+timeout 20 "${WS}/scripts/ssh-vm0.sh" "cd '${VM_DIR}' && sudo timeout 10 ./mitosis_cxl_fd_resume prepare '${KEY11}'" || true
+
+echo "[extra] VM1 restores regular-file fd state from CXL"
+timeout 20 "${WS}/scripts/ssh-vm1.sh" "cd '${VM_DIR}' && sudo timeout 10 ./mitosis_cxl_fd_resume resume '${KEY11}'"
 
 echo "[extra] VM0 prepares a cross-VM non-main thread checkpoint"
 timeout 20 "${WS}/scripts/ssh-vm0.sh" "cd '${VM_DIR}' && sudo timeout 10 ./mitosis_cxl_thread_resume prepare '${KEY8}'" || true
