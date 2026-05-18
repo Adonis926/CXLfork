@@ -166,7 +166,7 @@ static void parse_args(int argc, char **argv, struct options *opt)
     opt->iters = DEFAULT_ITERS;
 
     if (argc < 2) {
-        fprintf(stderr, "usage: %s checkpoint|restore [--dax PATH] [--mb N] [--iters N]\n", argv[0]);
+        fprintf(stderr, "usage: %s checkpoint|restore|serve [--dax PATH] [--mb N] [--iters N]\n", argv[0]);
         exit(2);
     }
     opt->mode = argv[1];
@@ -188,6 +188,35 @@ static void parse_args(int argc, char **argv, struct options *opt)
         fprintf(stderr, "heap size and iterations must be non-zero\n");
         exit(2);
     }
+}
+
+static int do_serve(const struct options *opt)
+{
+    unsigned char *heap = malloc(opt->heap_len);
+    uint64_t counter = 0;
+    uint64_t checksum;
+
+    if (!heap)
+        die("malloc serve heap");
+
+    fill_heap(heap, opt->heap_len, 11);
+
+    for (;;) {
+        uint64_t start = counter;
+        uint64_t end = counter + opt->iters;
+        uint64_t acc = mutate_heap(heap, opt->heap_len, start, end);
+
+        counter = end;
+        checksum = fnv1a64(heap, opt->heap_len);
+        printf("serverless_tick pid=%ld counter=%" PRIu64 " heap=%zu acc=%" PRIu64
+               " checksum=0x%016" PRIx64 "\n",
+               (long)getpid(), counter, opt->heap_len, acc, checksum);
+        fflush(stdout);
+        usleep(100000);
+    }
+
+    free(heap);
+    return 0;
 }
 
 static int do_checkpoint(const struct options *opt)
@@ -308,7 +337,9 @@ int main(int argc, char **argv)
         return do_checkpoint(&opt);
     if (strcmp(opt.mode, "restore") == 0)
         return do_restore(&opt);
+    if (strcmp(opt.mode, "serve") == 0)
+        return do_serve(&opt);
 
-    fprintf(stderr, "mode must be checkpoint or restore\n");
+    fprintf(stderr, "mode must be checkpoint, restore, or serve\n");
     return 2;
 }
