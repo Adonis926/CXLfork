@@ -3,9 +3,11 @@ cxl/
 logs/
 pids/
 sockets/
+results/
 cloudinit/
 kernel/linux-*.tar.*
 kernel/linux
+kernel/linux-6.6.32-cxlfork/
 kernel/build-*/
 *.qcow2
 *.img
