@@ -115,6 +115,7 @@ deploy_cxlfork() {
 			"$CXLFORK_KERNEL/drivers/cxlfork/cxlfork.ko" \
 			"$CXLFORK_KERNEL/samples/cxlfork/cxlfork_demo" \
 			"$CXLFORK_KERNEL/samples/cxlfork/cxlfork_fork_demo" \
+			"$CXLFORK_KERNEL/samples/cxlfork/cxlfork_workload_bench" \
 			ubuntu@localhost:"$CXLFORK_DIR/" >/dev/null
 		vm_ssh_port "$port" "cd '$CXLFORK_DIR' && sudo rmmod cxlfork 2>/dev/null || true; sudo insmod '$CXLFORK_DIR/cxlfork.ko' cxl_phys='$CXL_PHYS' cxl_size='$CXL_SIZE'"
 	done
@@ -140,12 +141,29 @@ deploy_mitosis_local() {
 	vm_ssh_port "$port" "cd '$MITOSIS_DIR' && sudo rmmod cxlfork_mitosis 2>/dev/null || true; sudo insmod '$MITOSIS_DIR/cxlfork_mitosis.ko' cxl_phys='$CXL_PHYS' cxl_size='$CXL_SIZE'"
 }
 
+workload_arg() {
+	case "$1" in
+		Float|float) printf 'Float\n' ;;
+		Json|json) printf 'Json\n' ;;
+		Pyaes|pyaes) printf 'Pyaes\n' ;;
+		HTML|html) printf 'HTML\n' ;;
+		*) printf 'touch\n' ;;
+	esac
+}
+
+is_real_workload() {
+	case "$1" in
+		Float|float|Json|json|Pyaes|pyaes|HTML|html) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
 run_cxlfork_workload() {
 	local workload=$1
 	local bytes=$2
 	local key=$3
 	local i phase prepare_out resume_out stats_out
-	local prepare_ns restore_ns total_ns pages faults local_est
+	local prepare_ns restore_ns workload_ns total_ns pages faults local_est workload_run
 
 	for phase in warmup measured; do
 		local count=$WARMUP
@@ -153,18 +171,32 @@ run_cxlfork_workload() {
 			count=$ITERS
 		fi
 		for ((i = 0; i < count; i++)); do
-			prepare_out=$(vm_ssh_port "$VM0_PORT" "cd '$CXLFORK_DIR' && sudo ./cxlfork_fork_demo prepare '$key' '$bytes'")
-			resume_out=$(vm_ssh_port "$VM1_PORT" "cd '$CXLFORK_DIR' && sudo ./cxlfork_fork_demo resume-child-reopen-fds '$key' '$bytes'")
-			vm_ssh_port "$VM0_PORT" "cd '$CXLFORK_DIR' && sudo ./cxlfork_fork_demo verify-original '$key' '$bytes'" >/dev/null
+			workload_run=$(workload_arg "$workload")
+			if is_real_workload "$workload"; then
+				prepare_out=$(vm_ssh_port "$VM0_PORT" "cd '$CXLFORK_DIR' && sudo ./cxlfork_workload_bench prepare '$key' '$workload_run' '$bytes'")
+				resume_out=$(vm_ssh_port "$VM1_PORT" "cd '$CXLFORK_DIR' && sudo ./cxlfork_workload_bench resume '$key' '$workload_run' '$bytes'")
+			else
+				prepare_out=$(vm_ssh_port "$VM0_PORT" "cd '$CXLFORK_DIR' && sudo ./cxlfork_fork_demo prepare '$key' '$bytes'")
+				resume_out=$(vm_ssh_port "$VM1_PORT" "cd '$CXLFORK_DIR' && sudo ./cxlfork_fork_demo resume-child-reopen-fds '$key' '$bytes'")
+				vm_ssh_port "$VM0_PORT" "cd '$CXLFORK_DIR' && sudo ./cxlfork_fork_demo verify-original '$key' '$bytes'" >/dev/null
+			fi
 			stats_out=$(vm_ssh_port "$VM1_PORT" "cd '$CXLFORK_DIR' && sudo ./cxlfork_demo stats '$key'" 2>/dev/null || true)
 			prepare_ns=$(extract_field "$prepare_out" prepare_ns)
-			restore_ns=$(extract_field "$resume_out" resume_ns)
-			total_ns=$(extract_field "$resume_out" invoke_ns)
+			restore_ns=$(extract_field "$resume_out" restore_ns)
+			: "${restore_ns:=$(extract_field "$resume_out" resume_ns)}"
+			total_ns=$(extract_field "$resume_out" total_ns)
+			: "${total_ns:=$(extract_field "$resume_out" invoke_ns)}"
+			workload_ns=$(extract_field "$resume_out" workload_ns)
+			: "${workload_ns:=0}"
 			pages=$(extract_field "$prepare_out" pages)
 			faults=$(extract_field "$stats_out" faults)
 			: "${faults:=NA}"
 			local_est=4096
 			append_row "CXLfork,figure7-synthetic,$workload,$bytes,$phase,1,0,$key,$prepare_ns,$restore_ns,$((total_ns - restore_ns)),0,$total_ns,$total_ns,$total_ns,$total_ns,$pages,$faults,$local_est,restore+faults measured; execution payload is page-touch proxy"
+			if is_real_workload "$workload"; then
+				sed -i '$d' "$OUT"
+				append_row "CXLfork,figure7-real-c,$workload,$bytes,$phase,1,0,$key,$prepare_ns,$restore_ns,$((total_ns - restore_ns - workload_ns)),$workload_ns,$total_ns,$total_ns,$total_ns,$total_ns,$pages,$faults,$local_est,C implementation of paper workload proxy"
+			fi
 			printf '[CXLfork] workload=%s phase=%s iter=%s prepare_ns=%s restore_ns=%s total_ns=%s faults=%s\n' \
 				"$workload" "$phase" "$i" "$prepare_ns" "$restore_ns" "$total_ns" "$faults"
 			key=$((key + 1))
@@ -181,10 +213,12 @@ run_mitosis_workload() {
 	local split_begin split_end split_total split_fault_ns touched local_est
 
 	port=$(vm_port "$VM")
+	local workload_run
+	workload_run=$(workload_arg "$workload")
 	vm_ssh_port "$port" "cd '$MITOSIS_DIR' && sudo ./mitosis_cxl_forkctl release '$key' 2>/dev/null || true" >/dev/null
-	prepare_out=$(vm_ssh_port "$port" "cd '$MITOSIS_DIR' && rm -f prepare-$key.log && sudo sh -c './mitosis_cxl_lean_bench prepare $key $bytes >prepare-$key.log 2>&1' && cat prepare-$key.log")
-	invoke_out=$(vm_ssh_port "$port" "cd '$MITOSIS_DIR' && rm -f invoke-$key.log && sudo sh -c './mitosis_cxl_lean_bench invoke $key $ITERS $WARMUP $bytes >invoke-$key.log 2>&1' && cat invoke-$key.log")
-	pool_out=$(vm_ssh_port "$port" "cd '$MITOSIS_DIR' && rm -f pool-$key.log && sudo sh -c './mitosis_cxl_lean_bench pool $key $ITERS $WARMUP $bytes >pool-$key.log 2>&1' && cat pool-$key.log")
+	prepare_out=$(vm_ssh_port "$port" "cd '$MITOSIS_DIR' && rm -f prepare-$key.log && sudo sh -c './mitosis_cxl_lean_bench prepare $key $bytes $workload_run >prepare-$key.log 2>&1' && cat prepare-$key.log")
+	invoke_out=$(vm_ssh_port "$port" "cd '$MITOSIS_DIR' && rm -f invoke-$key.log && sudo sh -c './mitosis_cxl_lean_bench invoke $key $ITERS $WARMUP $bytes $workload_run >invoke-$key.log 2>&1' && cat invoke-$key.log")
+	pool_out=$(vm_ssh_port "$port" "cd '$MITOSIS_DIR' && rm -f pool-$key.log && sudo sh -c './mitosis_cxl_lean_bench pool $key $ITERS $WARMUP $bytes $workload_run >pool-$key.log 2>&1' && cat pool-$key.log")
 	split_out=$(vm_ssh_port "$port" "cd '$MITOSIS_DIR' && rm -f split-$key.log && start=\$(date +%s%N) && sudo sh -c './mitosis_cxl_forkctl resume $key --touch >split-$key.log 2>&1' && end=\$(date +%s%N) && cat split-$key.log && echo split_total_ns=\$((end - start))")
 
 	prepare_ns=$(extract_field "$prepare_out" prepare_ns)
