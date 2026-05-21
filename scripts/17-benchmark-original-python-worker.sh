@@ -18,6 +18,8 @@ ITERS=${ITERS:-5}
 WARMUP=${WARMUP:-1}
 WORKLOADS=${WORKLOADS:-"json:4194304 linpack:2097152 pyaes:4194304 chameleon:8388608 compression:8388608"}
 OUT=${OUT:-$WS/results/original-python-worker-$(date +%Y%m%d-%H%M%S).csv}
+CONTAINER_MODE=${CONTAINER_MODE:-process}
+PYTHON_USER_SITE=${PYTHON_USER_SITE:-/home/ubuntu/.local/lib/python3.12/site-packages}
 SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
 
 vm_ssh_port() {
@@ -96,15 +98,47 @@ csv_header() {
 	printf 'design,benchmark,workload,bytes,iters,warmup,key,prepare_ns,restore_ns,page_fault_ns,execution_ns,total_ns,p50_ns,p90_ns,p99_ns,pages,faults,notes\n'
 }
 
+worker_cmd() {
+	local mode=$1
+	shift
+	local cmd=$*
+
+	if [[ "$mode" == "namespace" ]]; then
+		printf "sudo env PYTHONPATH='%s' unshare --fork --pid --mount-proc --uts --ipc --mount -- %s" \
+			"$PYTHON_USER_SITE" "$cmd"
+	else
+		printf "%s" "$cmd"
+	fi
+}
+
+benchmark_name() {
+	if [[ "$CONTAINER_MODE" == "namespace" ]]; then
+		printf 'original-python-worker-namespace'
+	else
+		printf 'original-python-worker'
+	fi
+}
+
+benchmark_note() {
+	if [[ "$CONTAINER_MODE" == "namespace" ]]; then
+		printf 'original Python worker runs in fresh pid/mount/uts/ipc namespaces and invokes CXLfork prepare/resume'
+	else
+		printf 'original Python worker invokes CXLfork prepare/resume; fixed working-set pages are restored over shared CXL'
+	fi
+}
+
 run_one() {
 	local workload=$1
 	local bytes=$2
 	local key=$3
 	local prep_out resume_out
+	local prep_cmd resume_cmd
 	local prepare_ns restore_ns fault_ns exec_ns total_ns p50_ns p90_ns p99_ns pages faults
 
-	prep_out=$(vm_ssh_port "$VM0_PORT" "cd '$PY_DIR/common' && python3 ./cxlfork_python_worker.py prepare --root '$PY_DIR/fork-functions' --workload '$workload' --key '$key' --bytes '$bytes' --warmup '$WARMUP'")
-	resume_out=$(vm_ssh_port "$VM1_PORT" "cd '$PY_DIR/common' && python3 ./cxlfork_python_worker.py resume --root '$PY_DIR/fork-functions' --workload '$workload' --key '$key' --bytes '$bytes' --iters '$ITERS' --warmup '$WARMUP'")
+	prep_cmd=$(worker_cmd "$CONTAINER_MODE" "python3 ./cxlfork_python_worker.py prepare --root '$PY_DIR/fork-functions' --workload '$workload' --key '$key' --bytes '$bytes' --warmup '$WARMUP'")
+	resume_cmd=$(worker_cmd "$CONTAINER_MODE" "python3 ./cxlfork_python_worker.py resume --root '$PY_DIR/fork-functions' --workload '$workload' --key '$key' --bytes '$bytes' --iters '$ITERS' --warmup '$WARMUP'")
+	prep_out=$(vm_ssh_port "$VM0_PORT" "cd '$PY_DIR/common' && $prep_cmd")
+	resume_out=$(vm_ssh_port "$VM1_PORT" "cd '$PY_DIR/common' && $resume_cmd")
 
 	prepare_ns=$(extract_field "$prep_out" prepare_ns)
 	restore_ns=$(extract_field "$resume_out" restore_ns)
@@ -117,13 +151,14 @@ run_one() {
 	faults=$(extract_field "$resume_out" faults)
 	total_ns=$((restore_ns + fault_ns + exec_ns))
 
-	printf 'CXLfork,original-python-worker,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
+	printf 'CXLfork,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
+		"$(benchmark_name)" \
 		"$workload" "$bytes" "$ITERS" "$WARMUP" "$key" "$prepare_ns" "$restore_ns" "$fault_ns" "$exec_ns" \
 		"$total_ns" "$p50_ns" "$p90_ns" "$p99_ns" "$pages" "$faults" \
-		"original Python worker invokes CXLfork prepare/resume; fixed working-set pages are restored over shared CXL" >>"$OUT"
+		"$(benchmark_note)" >>"$OUT"
 
-	printf '[original-python-worker] workload=%s prepare_ns=%s restore_ns=%s fault_ns=%s execution_ns=%s total_ns=%s\n' \
-		"$workload" "$prepare_ns" "$restore_ns" "$fault_ns" "$exec_ns" "$total_ns"
+	printf '[%s] workload=%s prepare_ns=%s restore_ns=%s fault_ns=%s execution_ns=%s total_ns=%s\n' \
+		"$(benchmark_name)" "$workload" "$prepare_ns" "$restore_ns" "$fault_ns" "$exec_ns" "$total_ns"
 }
 
 main() {
