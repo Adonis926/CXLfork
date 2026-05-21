@@ -93,12 +93,14 @@ def fill_working_set(base, length):
         arr[-1] = 0xC584F04B5A5A5A5A
 
 
-def touch_working_set(base, length):
+def touch_working_set(base, length, write_pages=False):
     arr = (ctypes.c_uint64 * (length // 8)).from_address(base)
     step = PAGE_SIZE // 8
     acc = 0
     for i in range(0, len(arr), step):
         acc ^= arr[i]
+        if write_pages:
+            arr[i] ^= 0xC01DF00D55AA55AA
     if len(arr):
         acc ^= arr[-1]
     return acc
@@ -242,7 +244,7 @@ def cmd_resume(args):
     try:
         res = ioctl_resume(fd, args.key)
         start = ns_now()
-        acc = touch_working_set(args.base, align_page(args.bytes))
+        acc = touch_working_set(args.base, align_page(args.bytes), args.dirty_pages)
         fault_ns = ns_now() - start
         exec_stats = measure_handler(fn, args.iters, args.warmup)
         stats = ioctl_stats(fd, args.key)
@@ -284,6 +286,7 @@ def main():
     parser.add_argument("--base", type=lambda s: int(s, 0), default=DEFAULT_BASE)
     parser.add_argument("--iters", type=int, default=5)
     parser.add_argument("--warmup", type=int, default=1)
+    parser.add_argument("--dirty-pages", action="store_true")
     args = parser.parse_args()
     if args.mode == "prepare":
         cmd_prepare(args)
