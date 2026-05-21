@@ -176,7 +176,7 @@ run_one() {
 	key=$((key + 1))
 	vm_ssh_port "$port" "cd '$MITOSIS_DIR' && sudo ./mitosis_cxl_forkctl release '$key' 2>/dev/null || true" >/dev/null
 	m_prep=$(vm_ssh_port "$port" "cd '$MITOSIS_DIR' && rm -f prepare-$key.log && sudo sh -c './mitosis_cxl_lean_bench prepare $key $bytes touch >prepare-$key.log 2>&1' && cat prepare-$key.log")
-	m_split=$(vm_ssh_port "$port" "cd '$MITOSIS_DIR' && rm -f split-$key.log && start=\$(date +%s%N) && sudo sh -c './mitosis_cxl_forkctl resume $key --touch >split-$key.log 2>&1' && end=\$(date +%s%N) && cat split-$key.log && echo split_total_ns=\$((end - start))")
+	m_split=$(vm_ssh_port "$port" "cd '$MITOSIS_DIR' && rm -f split-$key.log && start=\$(date +%s%N) && sudo sh -c './mitosis_cxl_forkctl resume $key --touch >split-$key.log 2>&1' && end=\$(date +%s%N) && cat split-$key.log prepare-$key.log && echo split_total_ns=\$((end - start))")
 	m_prepare=$(extract_field "$m_prep" prepare_ns)
 	m_restore=$(extract_field "$m_split" resume_ns)
 	: "${m_restore:=0}"
