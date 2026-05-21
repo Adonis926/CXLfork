@@ -113,7 +113,7 @@ worker_cmd() {
 }
 
 csv_header() {
-	printf 'system,benchmark,workload,state_bytes,mode,iters,warmup,key,prepare_ns,restore_ns,page_state_ns,execution_ns,total_ns,p50_ns,p90_ns,p99_ns,pages,faults,notes\n'
+	printf 'system,benchmark,workload,state_bytes,mode,iters,warmup,key,control_ns,prepare_ns,restore_ns,page_state_ns,execution_ns,total_ns,handler_p50_ns,handler_p90_ns,handler_p99_ns,pages,faults,notes\n'
 }
 
 run_local() {
@@ -137,11 +137,11 @@ run_local() {
 	p90=$(extract_field "$out" p90_total_ns)
 	p99=$(extract_field "$out" p99_total_ns)
 	pages=$(extract_field "$out" pages)
-	printf 'LocalFork,amplified-open-serverless,%s,%s,%s,%s,%s,NA,0,0,%s,%s,%s,%s,%s,%s,%s,NA,%s\n' \
-		"$workload" "$bytes" "$mode" "$ITERS" "$WARMUP" "$touch_ns" "$exec_ns" "$total_ns" \
+	printf 'LocalFork,amplified-open-serverless,%s,%s,%s,%s,%s,NA,%s,0,0,%s,%s,%s,%s,%s,%s,%s,NA,%s\n' \
+		"$workload" "$bytes" "$mode" "$ITERS" "$WARMUP" "$fork_ns" "$touch_ns" "$exec_ns" "$total_ns" \
 		"$p50" "$p90" "$p99" "$pages" "$notes" >>"$OUT"
-	printf '[LocalFork] workload=%s state=%s mode=%s touch_ns=%s exec_ns=%s total_ns=%s\n' \
-		"$workload" "$bytes" "$mode" "$touch_ns" "$exec_ns" "$total_ns"
+	printf '[LocalFork] workload=%s state=%s mode=%s fork_ns=%s touch_ns=%s exec_ns=%s total_ns=%s\n' \
+		"$workload" "$bytes" "$mode" "$fork_ns" "$touch_ns" "$exec_ns" "$total_ns"
 }
 
 run_cxlfork() {
@@ -171,12 +171,12 @@ run_cxlfork() {
 	p99=$(extract_field "$resume_out" p99_ns)
 	pages=$(extract_field "$resume_out" pages)
 	faults=$(extract_field "$resume_out" faults)
-	total_ns=$((restore_ns + fault_ns + exec_ns))
-	printf 'CXLfork,amplified-open-serverless,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
-		"$workload" "$bytes" "$mode" "$ITERS" "$WARMUP" "$key" "$prepare_ns" "$restore_ns" \
+	total_ns=$((prepare_ns + restore_ns + fault_ns + exec_ns))
+	printf 'CXLfork,amplified-open-serverless,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
+		"$workload" "$bytes" "$mode" "$ITERS" "$WARMUP" "$key" "$((prepare_ns + restore_ns))" "$prepare_ns" "$restore_ns" \
 		"$fault_ns" "$exec_ns" "$total_ns" "$p50" "$p90" "$p99" "$pages" "$faults" "$notes" >>"$OUT"
-	printf '[CXLfork] workload=%s state=%s mode=%s prepare_ns=%s restore_ns=%s state_ns=%s exec_ns=%s total_ns=%s\n' \
-		"$workload" "$bytes" "$mode" "$prepare_ns" "$restore_ns" "$fault_ns" "$exec_ns" "$total_ns"
+	printf '[CXLfork] workload=%s state=%s mode=%s control_ns=%s prepare_ns=%s restore_ns=%s state_ns=%s exec_ns=%s total_ns=%s\n' \
+		"$workload" "$bytes" "$mode" "$((prepare_ns + restore_ns))" "$prepare_ns" "$restore_ns" "$fault_ns" "$exec_ns" "$total_ns"
 }
 
 main() {
