@@ -32,6 +32,7 @@ OFF_RESTORE_NR_REGIONS = 16
 OFF_RESTORE_NR_PTES = 24
 OFF_RESTORE_TOTAL_PAGES = 32
 OFF_RESTORE_NS = 40
+OFF_RESTORE_FLAGS = 8
 OFF_STATS_READY = 8
 OFF_STATS_TOTAL_PAGES = 40
 OFF_STATS_FAULTS = 48
@@ -184,7 +185,7 @@ def ioctl_prepare(fd, key, base, length):
 def ioctl_resume(fd, key):
     buf = bytearray(RESTORE_SIZE)
     struct.pack_into("Q", buf, OFF_KEY, key)
-    struct.pack_into("Q", buf, OFF_FLAGS, CXLFORK_F_SHARED_COW)
+    struct.pack_into("Q", buf, OFF_RESTORE_FLAGS, CXLFORK_F_SHARED_COW)
     fcntl.ioctl(fd, CXLFORK_FORK_RESUME, buf, True)
     return {
         "regions": struct.unpack_from("Q", buf, OFF_RESTORE_NR_REGIONS)[0],
@@ -245,6 +246,7 @@ def cmd_resume(args):
         fault_ns = ns_now() - start
         exec_stats = measure_handler(fn, args.iters, args.warmup)
         stats = ioctl_stats(fd, args.key)
+        logical_faults = min(stats["faults"], res["pages"])
     finally:
         os.close(fd)
     print(
@@ -261,7 +263,7 @@ def cmd_resume(args):
             res["pages"],
             res["restore_ns"],
             fault_ns,
-            stats["faults"],
+            logical_faults,
             exec_stats["avg_ns"],
             exec_stats["p50_ns"],
             exec_stats["p90_ns"],
