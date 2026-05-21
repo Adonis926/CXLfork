@@ -71,7 +71,7 @@ copy_tree_to_vm() {
 			fi
 		done
 	done
-	vm_scp_port "$port" "$COMMON_SRC/"*.py "$WS/scripts/cxlfork_python_worker.py" \
+	vm_scp_port "$port" "$COMMON_SRC/"*.py "$WS/scripts/cxlfork_python_worker.py" "$WS/scripts/cxlfork_container_worker.sh" \
 		ubuntu@localhost:"$PY_DIR/common/" >/dev/null
 }
 
@@ -104,16 +104,25 @@ worker_cmd() {
 	local cmd=$*
 
 	if [[ "$mode" == "namespace" ]]; then
-		printf "sudo env PYTHONPATH='%s' unshare --fork --pid --mount-proc --uts --ipc --mount -- %s" \
+		printf "PYTHON_USER_SITE='%s' ./cxlfork_container_worker.sh namespace -- %s" \
+			"$PYTHON_USER_SITE" "$cmd"
+	elif [[ "$mode" == "cgroup" ]]; then
+		printf "./cxlfork_container_worker.sh cgroup -- %s" "$cmd"
+	elif [[ "$mode" == "rootfs" ]]; then
+		printf "PYTHON_USER_SITE='%s' ./cxlfork_container_worker.sh rootfs -- %s" \
 			"$PYTHON_USER_SITE" "$cmd"
 	else
-		printf "%s" "$cmd"
+		printf "./cxlfork_container_worker.sh process -- %s" "$cmd"
 	fi
 }
 
 benchmark_name() {
 	if [[ "$CONTAINER_MODE" == "namespace" ]]; then
 		printf 'original-python-worker-namespace'
+	elif [[ "$CONTAINER_MODE" == "cgroup" ]]; then
+		printf 'original-python-worker-cgroup'
+	elif [[ "$CONTAINER_MODE" == "rootfs" ]]; then
+		printf 'original-python-worker-rootfs'
 	else
 		printf 'original-python-worker'
 	fi
@@ -122,6 +131,10 @@ benchmark_name() {
 benchmark_note() {
 	if [[ "$CONTAINER_MODE" == "namespace" ]]; then
 		printf 'original Python worker runs in fresh pid/mount/uts/ipc namespaces and invokes CXLfork prepare/resume'
+	elif [[ "$CONTAINER_MODE" == "cgroup" ]]; then
+		printf 'original Python worker runs in a cgroup v2 leaf and invokes CXLfork prepare/resume'
+	elif [[ "$CONTAINER_MODE" == "rootfs" ]]; then
+		printf 'original Python worker runs in fresh namespaces with chroot/bind rootfs and cgroup v2 leaf'
 	else
 		printf 'original Python worker invokes CXLfork prepare/resume; fixed working-set pages are restored over shared CXL'
 	fi
