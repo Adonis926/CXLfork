@@ -13,6 +13,7 @@ VM0_PORT=${VM0_PORT:-2200}
 VM1_PORT=${VM1_PORT:-2201}
 CXLFORK_DIR=${CXLFORK_DIR:-/tmp/cxlfork}
 PY_DIR=${PY_DIR:-/tmp/cxlfork-original-worker}
+ROOTFS_DIR=${ROOTFS_DIR:-/tmp/cxlfork-rootfs}
 KEY_BASE=${KEY_BASE:-30000}
 ITERS=${ITERS:-5}
 WARMUP=${WARMUP:-1}
@@ -72,6 +73,7 @@ copy_tree_to_vm() {
 		done
 	done
 	vm_scp_port "$port" "$COMMON_SRC/"*.py "$WS/scripts/cxlfork_python_worker.py" "$WS/scripts/cxlfork_container_worker.sh" \
+		"$WS/scripts/cxlfork_lean_exec" \
 		ubuntu@localhost:"$PY_DIR/common/" >/dev/null
 }
 
@@ -84,6 +86,9 @@ build_and_deploy() {
 
 	make -C "$KBUILD" M="$CXLFORK_KERNEL/drivers/cxlfork" CONFIG_CXLFORK=m \
 		KBUILD_MODPOST_WARN=1 modules >/tmp/cxlfork_original_worker_module.log
+	gcc -O2 -Wall -Wextra -o "$WS/scripts/cxlfork_lean_exec" \
+		"$WS/scripts/cxlfork_lean_exec.c" "$WS/scripts/cxlfork_lean_container.c" \
+		>/tmp/cxlfork_lean_exec_build.log 2>&1
 
 	for port in "$VM0_PORT" "$VM1_PORT"; do
 		vm_ssh_port "$port" "mkdir -p '$CXLFORK_DIR'"
@@ -111,6 +116,9 @@ worker_cmd() {
 	elif [[ "$mode" == "rootfs" ]]; then
 		printf "PYTHON_USER_SITE='%s' ./cxlfork_container_worker.sh rootfs -- %s" \
 			"$PYTHON_USER_SITE" "$cmd"
+	elif [[ "$mode" == "lean" ]]; then
+		printf "sudo env PYTHON_USER_SITE='%s' CXLFORK_CGROUP_ROOT=/sys/fs/cgroup/cxlfork-bench ./cxlfork_lean_exec rootfs-cached cxlfork-%s-%s '%s' -- %s" \
+			"$PYTHON_USER_SITE" "$mode" "$RANDOM" "$ROOTFS_DIR" "$cmd"
 	else
 		printf "./cxlfork_container_worker.sh process -- %s" "$cmd"
 	fi
@@ -123,6 +131,8 @@ benchmark_name() {
 		printf 'original-python-worker-cgroup'
 	elif [[ "$CONTAINER_MODE" == "rootfs" ]]; then
 		printf 'original-python-worker-rootfs'
+	elif [[ "$CONTAINER_MODE" == "lean" ]]; then
+		printf 'original-python-worker-lean'
 	else
 		printf 'original-python-worker'
 	fi
@@ -135,6 +145,8 @@ benchmark_note() {
 		printf 'original Python worker runs in a cgroup v2 leaf and invokes CXLfork prepare/resume'
 	elif [[ "$CONTAINER_MODE" == "rootfs" ]]; then
 		printf 'original Python worker runs in fresh namespaces with chroot/bind rootfs and cgroup v2 leaf'
+	elif [[ "$CONTAINER_MODE" == "lean" ]]; then
+		printf 'original Python worker runs through ported Mitosis lean-container API on cgroup v2/rootfs'
 	else
 		printf 'original Python worker invokes CXLfork prepare/resume; fixed working-set pages are restored over shared CXL'
 	fi

@@ -12,3 +12,4 @@ kernel/build-*/
 *.qcow2
 *.img
 *.log
+scripts/cxlfork_lean_exec
