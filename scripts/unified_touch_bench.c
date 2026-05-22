@@ -21,6 +21,7 @@
 struct child_result {
 	uint64_t child_start_ns;
 	uint64_t restore_ns;
+	uint64_t global_restore_ns;
 	uint64_t touch_ns;
 	uint64_t total_child_ns;
 	uint64_t checksum;
@@ -268,11 +269,13 @@ static int cxlfork_child(uint64_t key, size_t len, int write_pages, int pipefd)
 		_exit(1);
 	memset(&op, 0, sizeof(op));
 	op.key = key;
-	op.flags = CXLFORK_F_SHARED_COW | CXLFORK_F_APPLY_MM_STATE | CXLFORK_F_REOPEN_FDS;
+	op.flags = CXLFORK_F_SHARED_COW | CXLFORK_F_APPLY_MM_STATE |
+		   CXLFORK_F_APPLY_GLOBAL_STATE | CXLFORK_F_REOPEN_FDS;
 	begin = nsec_now();
 	if (ioctl(fd, CXLFORK_FORK_RESUME, &op))
 		_exit(2);
 	res.restore_ns = op.restore_ns ? op.restore_ns : nsec_now() - begin;
+	res.global_restore_ns = op.global_restore_ns;
 	(void)read_stats(fd, key, &before_faults);
 	touch_begin = nsec_now();
 	res.checksum = touch_pages(DEFAULT_BASE, len, write_pages);
@@ -289,6 +292,7 @@ static int run_resume(uint64_t key, size_t len, int iters, int warmup, int write
 {
 	uint64_t *fork_ns;
 	uint64_t *restore_ns;
+	uint64_t *global_restore_ns;
 	uint64_t *touch_ns;
 	uint64_t *total_ns;
 	uint64_t *faults;
@@ -297,10 +301,12 @@ static int run_resume(uint64_t key, size_t len, int iters, int warmup, int write
 
 	fork_ns = calloc((size_t)iters, sizeof(*fork_ns));
 	restore_ns = calloc((size_t)iters, sizeof(*restore_ns));
+	global_restore_ns = calloc((size_t)iters, sizeof(*global_restore_ns));
 	touch_ns = calloc((size_t)iters, sizeof(*touch_ns));
 	total_ns = calloc((size_t)iters, sizeof(*total_ns));
 	faults = calloc((size_t)iters, sizeof(*faults));
-	if (!fork_ns || !restore_ns || !touch_ns || !total_ns || !faults) {
+	if (!fork_ns || !restore_ns || !global_restore_ns || !touch_ns ||
+	    !total_ns || !faults) {
 		perror("calloc");
 		return 1;
 	}
@@ -343,6 +349,7 @@ static int run_resume(uint64_t key, size_t len, int iters, int warmup, int write
 		if (i >= warmup) {
 			fork_ns[measured] = res.child_start_ns - begin;
 			restore_ns[measured] = res.restore_ns;
+			global_restore_ns[measured] = res.global_restore_ns;
 			touch_ns[measured] = res.touch_ns;
 			total_ns[measured] = nsec_now() - begin;
 			faults[measured] = res.faults;
@@ -352,11 +359,12 @@ static int run_resume(uint64_t key, size_t len, int iters, int warmup, int write
 
 	printf("unified_touch system=CXLfork bytes=%zu mode=%s iters=%d warmup=%d "
 	       "fork_to_child_ns=%" PRIu64 " restore_ns=%" PRIu64
-	       " touch_ns=%" PRIu64 " total_ns=%" PRIu64
+	       " global_restore_ns=%" PRIu64 " touch_ns=%" PRIu64 " total_ns=%" PRIu64
 	       " pages=%zu faults=%" PRIu64 " checksum=%" PRIu64 " verify=ok\n",
 	       len, write_pages ? "write" : "read", iters, warmup,
 	       avg_u64(fork_ns, iters), avg_u64(restore_ns, iters),
-	       avg_u64(touch_ns, iters), avg_u64(total_ns, iters),
+	       avg_u64(global_restore_ns, iters), avg_u64(touch_ns, iters),
+	       avg_u64(total_ns, iters),
 	       len / PAGE_SIZE_LOCAL, avg_u64(faults, iters), checksum);
 	return 0;
 }

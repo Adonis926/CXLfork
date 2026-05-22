@@ -69,7 +69,7 @@ deploy() {
 }
 
 csv_header() {
-	printf 'system,bytes,mode,iters,warmup,key,prepare_ns,fork_to_child_ns,restore_ns,touch_ns,total_ns,full_ns,pages,faults,notes\n'
+	printf 'system,bytes,mode,iters,warmup,key,prepare_ns,fork_to_child_ns,restore_ns,global_restore_ns,touch_ns,total_ns,full_ns,pages,faults,notes\n'
 }
 
 run_local() {
@@ -82,7 +82,7 @@ run_local() {
 	touch_ns=$(field "$out" touch_ns)
 	total_ns=$(field "$out" total_ns)
 	pages=$(field "$out" pages)
-	printf 'LocalFork,%s,%s,%s,%s,NA,0,%s,0,%s,%s,%s,%s,NA,same volatile per-page touch loop\n' \
+	printf 'LocalFork,%s,%s,%s,%s,NA,0,%s,0,0,%s,%s,%s,%s,NA,same volatile per-page touch loop\n' \
 		"$bytes" "$mode" "$ITERS" "$WARMUP" "$fork_ns" "$touch_ns" "$total_ns" "$total_ns" "$pages" >>"$OUT"
 	printf '[LocalFork] bytes=%s mode=%s fork_ns=%s touch_ns=%s total_ns=%s\n' \
 		"$bytes" "$mode" "$fork_ns" "$touch_ns" "$total_ns"
@@ -93,6 +93,7 @@ run_cxlfork() {
 	local mode=$2
 	local key=$3
 	local prep_out resume_out prepare_ns fork_ns restore_ns touch_ns total_ns full_ns pages faults
+	local global_restore_ns
 
 	prep_out=$(vm_ssh "$VM0_PORT" "cd '$DIR' && ./unified_touch_bench prepare '$key' '$bytes'")
 	resume_out=$(vm_ssh "$VM1_PORT" "cd '$DIR' && ./unified_touch_bench resume '$key' '$bytes' '$ITERS' '$WARMUP' '$mode'")
@@ -100,15 +101,16 @@ run_cxlfork() {
 	pages=$(field "$prep_out" pages)
 	fork_ns=$(field "$resume_out" fork_to_child_ns)
 	restore_ns=$(field "$resume_out" restore_ns)
+	global_restore_ns=$(field "$resume_out" global_restore_ns)
 	touch_ns=$(field "$resume_out" touch_ns)
 	total_ns=$(field "$resume_out" total_ns)
 	faults=$(field "$resume_out" faults)
 	full_ns=$((prepare_ns + total_ns))
-	printf 'CXLfork,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,shared restore preinstalls read-only CXL PTEs\n' \
+	printf 'CXLfork,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,shared restore preinstalls read-only CXL PTEs and applies global state\n' \
 		"$bytes" "$mode" "$ITERS" "$WARMUP" "$key" "$prepare_ns" "$fork_ns" "$restore_ns" \
-		"$touch_ns" "$total_ns" "$full_ns" "$pages" "$faults" >>"$OUT"
-	printf '[CXLfork] bytes=%s mode=%s prepare_ns=%s restore_ns=%s touch_ns=%s total_ns=%s full_ns=%s faults=%s\n' \
-		"$bytes" "$mode" "$prepare_ns" "$restore_ns" "$touch_ns" "$total_ns" "$full_ns" "$faults"
+		"$global_restore_ns" "$touch_ns" "$total_ns" "$full_ns" "$pages" "$faults" >>"$OUT"
+	printf '[CXLfork] bytes=%s mode=%s prepare_ns=%s restore_ns=%s global_restore_ns=%s touch_ns=%s total_ns=%s full_ns=%s faults=%s\n' \
+		"$bytes" "$mode" "$prepare_ns" "$restore_ns" "$global_restore_ns" "$touch_ns" "$total_ns" "$full_ns" "$faults"
 }
 
 main() {
