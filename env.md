@@ -598,6 +598,40 @@ cxlfork_global_prepare key=68322 checkpoint_ns=8044 global_checkpoint_ns=2056 cw
 cxlfork_global_resume key=68322 restore_ns=16261 global_restore_ns=2143 fds_restored=1 cwd=/tmp/cxlfork-global-state umask=027 rlimit=777 sigmask=ok altstack=ok fd_state=ok checkpoint_mnt_ns=0 restore_mnt_ns=0 checkpoint_pid_ns=4026531836 restore_pid_ns=4026531836 restore_net_ns=4026531840 restore_cgroup_ns=4026531835 ns_flags=0xf verify=ok
 ```
 
+### 8.2 CXLfork tiering 策略
+
+当前 `cxlfork` kernel branch 已显式支持三种论文语义下的 tiering policy：
+
+- `mow` / `CXLFORK_F_MIGRATE_ON_WRITE`：默认策略。restore 时预装 read-only CXL PTE，read 直接访问 CXL snapshot，write 走内核 COW/MoW。
+- `moa` / `CXLFORK_F_MIGRATE_ON_ACCESS`：第一次 read/write 都触发 fault，并从 CXL snapshot 复制到本地页。
+- `hybrid` / `CXLFORK_F_HYBRID_TIERING`：用 `tiering_hot_stride_pages` 表示实验性 hot-page profile；hot page 或 write fault 迁移到本地，cold read 保持 CXL-backed mapping。
+
+`scripts/21-benchmark-unified-touch.sh` 已支持：
+
+```bash
+RUN_LOCAL=0 \
+ITERS=2 WARMUP=1 \
+SIZES=4194304 \
+MODES=read \
+POLICIES="mow moa hybrid" \
+HYBRID_HOT_STRIDE=4 \
+bash scripts/21-benchmark-unified-touch.sh
+```
+
+最近一次 4MB read smoke test：
+
+```text
+mow:    prepare_ns=779286  restore_ns=65321  touch_ns=21070   faults=0
+moa:    prepare_ns=1073843 restore_ns=16028  touch_ns=3492982 faults=1024
+hybrid: prepare_ns=715685  restore_ns=25274  touch_ns=3425950 faults=1024
+```
+
+解释：
+
+- `mow` read 没有 driver fault，因为 read-only CXL PTE 已在 restore 阶段安装。
+- `moa` read 对每页触发一次迁移，因此 4MB 有 1024 次 fault。
+- `hybrid` 当前 smoke test 会对 cold/hot 页都在第一次访问进入 driver fault 路径，其中 hot 页复制到本地，cold read 映射 CXL；后续可以把 `tiering_hot_stride_pages` 替换为真实 A/D bit 或 profile 结果。
+
 检查 VM 是否运行：
 
 ```bash

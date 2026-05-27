@@ -14,6 +14,9 @@ WARMUP=${WARMUP:-1}
 KEY_BASE=${KEY_BASE:-73000}
 SIZES=${SIZES:-"4194304 67108864"}
 MODES=${MODES:-"read write"}
+POLICIES=${POLICIES:-"mow moa hybrid"}
+HYBRID_HOT_STRIDE=${HYBRID_HOT_STRIDE:-4}
+RUN_LOCAL=${RUN_LOCAL:-1}
 DIR=${DIR:-/tmp/cxlfork-unified-touch}
 OUT=${OUT:-$WS/results/unified-touch-$(date +%Y%m%d-%H%M%S).csv}
 SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
@@ -57,8 +60,10 @@ build() {
 deploy() {
 	local port
 
-	vm_ssh "$LOCAL_PORT" "mkdir -p '$DIR'"
-	vm_scp "$LOCAL_PORT" "$WS/scripts/unified_touch_bench" ubuntu@localhost:"$DIR/" >/dev/null
+	if [[ "$RUN_LOCAL" == "1" ]]; then
+		vm_ssh "$LOCAL_PORT" "mkdir -p '$DIR'"
+		vm_scp "$LOCAL_PORT" "$WS/scripts/unified_touch_bench" ubuntu@localhost:"$DIR/" >/dev/null
+	fi
 	for port in "$VM0_PORT" "$VM1_PORT"; do
 		vm_ssh "$port" "mkdir -p '$DIR'"
 		vm_scp "$port" "$WS/scripts/unified_touch_bench" \
@@ -69,7 +74,7 @@ deploy() {
 }
 
 csv_header() {
-	printf 'system,bytes,mode,iters,warmup,key,prepare_ns,fork_to_child_ns,restore_ns,global_restore_ns,touch_ns,total_ns,full_ns,pages,faults,notes\n'
+	printf 'system,policy,hot_stride_pages,bytes,mode,iters,warmup,key,prepare_ns,fork_to_child_ns,restore_ns,global_restore_ns,touch_ns,total_ns,full_ns,pages,faults,notes\n'
 }
 
 run_local() {
@@ -82,7 +87,7 @@ run_local() {
 	touch_ns=$(field "$out" touch_ns)
 	total_ns=$(field "$out" total_ns)
 	pages=$(field "$out" pages)
-	printf 'LocalFork,%s,%s,%s,%s,NA,0,%s,0,0,%s,%s,%s,%s,NA,same volatile per-page touch loop\n' \
+	printf 'LocalFork,local,0,%s,%s,%s,%s,NA,0,%s,0,0,%s,%s,%s,%s,NA,same volatile per-page touch loop\n' \
 		"$bytes" "$mode" "$ITERS" "$WARMUP" "$fork_ns" "$touch_ns" "$total_ns" "$total_ns" "$pages" >>"$OUT"
 	printf '[LocalFork] bytes=%s mode=%s fork_ns=%s touch_ns=%s total_ns=%s\n' \
 		"$bytes" "$mode" "$fork_ns" "$touch_ns" "$total_ns"
@@ -92,11 +97,16 @@ run_cxlfork() {
 	local bytes=$1
 	local mode=$2
 	local key=$3
+	local policy=$4
 	local prep_out resume_out prepare_ns fork_ns restore_ns touch_ns total_ns full_ns pages faults
-	local global_restore_ns
+	local global_restore_ns hot_stride
 
+	hot_stride=0
+	if [[ "$policy" == "hybrid" ]]; then
+		hot_stride=$HYBRID_HOT_STRIDE
+	fi
 	prep_out=$(vm_ssh "$VM0_PORT" "cd '$DIR' && ./unified_touch_bench prepare '$key' '$bytes'")
-	resume_out=$(vm_ssh "$VM1_PORT" "cd '$DIR' && ./unified_touch_bench resume '$key' '$bytes' '$ITERS' '$WARMUP' '$mode'")
+	resume_out=$(vm_ssh "$VM1_PORT" "cd '$DIR' && ./unified_touch_bench resume '$key' '$bytes' '$ITERS' '$WARMUP' '$mode' '$policy' '$hot_stride'")
 	prepare_ns=$(field "$prep_out" prepare_ns)
 	pages=$(field "$prep_out" pages)
 	fork_ns=$(field "$resume_out" fork_to_child_ns)
@@ -106,15 +116,15 @@ run_cxlfork() {
 	total_ns=$(field "$resume_out" total_ns)
 	faults=$(field "$resume_out" faults)
 	full_ns=$((prepare_ns + total_ns))
-	printf 'CXLfork,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,shared restore preinstalls read-only CXL PTEs and applies global state\n' \
-		"$bytes" "$mode" "$ITERS" "$WARMUP" "$key" "$prepare_ns" "$fork_ns" "$restore_ns" \
+	printf 'CXLfork,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,tiering policy comparison with global state\n' \
+		"$policy" "$hot_stride" "$bytes" "$mode" "$ITERS" "$WARMUP" "$key" "$prepare_ns" "$fork_ns" "$restore_ns" \
 		"$global_restore_ns" "$touch_ns" "$total_ns" "$full_ns" "$pages" "$faults" >>"$OUT"
-	printf '[CXLfork] bytes=%s mode=%s prepare_ns=%s restore_ns=%s global_restore_ns=%s touch_ns=%s total_ns=%s full_ns=%s faults=%s\n' \
-		"$bytes" "$mode" "$prepare_ns" "$restore_ns" "$global_restore_ns" "$touch_ns" "$total_ns" "$full_ns" "$faults"
+	printf '[CXLfork] policy=%s hot_stride=%s bytes=%s mode=%s prepare_ns=%s restore_ns=%s global_restore_ns=%s touch_ns=%s total_ns=%s full_ns=%s faults=%s\n' \
+		"$policy" "$hot_stride" "$bytes" "$mode" "$prepare_ns" "$restore_ns" "$global_restore_ns" "$touch_ns" "$total_ns" "$full_ns" "$faults"
 }
 
 main() {
-	local bytes mode key
+	local bytes mode policy key
 
 	mkdir -p "$(dirname "$OUT")"
 	csv_header >"$OUT"
@@ -123,9 +133,13 @@ main() {
 	key=$KEY_BASE
 	for bytes in $SIZES; do
 		for mode in $MODES; do
-			run_local "$bytes" "$mode"
-			run_cxlfork "$bytes" "$mode" "$key"
-			key=$((key + 1))
+			if [[ "$RUN_LOCAL" == "1" ]]; then
+				run_local "$bytes" "$mode"
+			fi
+			for policy in $POLICIES; do
+				run_cxlfork "$bytes" "$mode" "$key" "$policy"
+				key=$((key + 1))
+			done
 		done
 	done
 	echo "results=$OUT"

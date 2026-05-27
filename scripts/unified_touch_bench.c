@@ -129,6 +129,18 @@ static int parse_write_mode(const char *mode)
 	exit(2);
 }
 
+static uint64_t tiering_flags(const char *policy)
+{
+	if (!strcmp(policy, "mow"))
+		return CXLFORK_F_MIGRATE_ON_WRITE;
+	if (!strcmp(policy, "moa"))
+		return CXLFORK_F_MIGRATE_ON_ACCESS;
+	if (!strcmp(policy, "hybrid"))
+		return CXLFORK_F_HYBRID_TIERING;
+	fprintf(stderr, "bad tiering policy: %s\n", policy);
+	exit(2);
+}
+
 static int run_local(size_t len, int iters, int warmup, int write_pages)
 {
 	uint64_t *fork_ns;
@@ -252,7 +264,8 @@ static int read_stats(int fd, uint64_t key, uint64_t *faults)
 	return 0;
 }
 
-static int cxlfork_child(uint64_t key, size_t len, int write_pages, int pipefd)
+static int cxlfork_child(uint64_t key, size_t len, int write_pages,
+			 const char *policy, uint64_t hot_stride, int pipefd)
 {
 	struct cxlfork_restore op;
 	struct child_result res;
@@ -269,8 +282,9 @@ static int cxlfork_child(uint64_t key, size_t len, int write_pages, int pipefd)
 		_exit(1);
 	memset(&op, 0, sizeof(op));
 	op.key = key;
-	op.flags = CXLFORK_F_SHARED_COW | CXLFORK_F_APPLY_MM_STATE |
+	op.flags = tiering_flags(policy) | CXLFORK_F_APPLY_MM_STATE |
 		   CXLFORK_F_APPLY_GLOBAL_STATE | CXLFORK_F_REOPEN_FDS;
+	op.tiering_hot_stride_pages = hot_stride;
 	begin = nsec_now();
 	if (ioctl(fd, CXLFORK_FORK_RESUME, &op))
 		_exit(2);
@@ -288,7 +302,8 @@ static int cxlfork_child(uint64_t key, size_t len, int write_pages, int pipefd)
 	return 0;
 }
 
-static int run_resume(uint64_t key, size_t len, int iters, int warmup, int write_pages)
+static int run_resume(uint64_t key, size_t len, int iters, int warmup,
+		      int write_pages, const char *policy, uint64_t hot_stride)
 {
 	uint64_t *fork_ns;
 	uint64_t *restore_ns;
@@ -329,7 +344,8 @@ static int run_resume(uint64_t key, size_t len, int iters, int warmup, int write
 		}
 		if (!pid) {
 			close(pipefd[0]);
-			_exit(cxlfork_child(key, len, write_pages, pipefd[1]));
+			_exit(cxlfork_child(key, len, write_pages, policy,
+					    hot_stride, pipefd[1]));
 		}
 		close(pipefd[1]);
 		if (read_full(pipefd[0], &res, sizeof(res))) {
@@ -357,11 +373,12 @@ static int run_resume(uint64_t key, size_t len, int iters, int warmup, int write
 		}
 	}
 
-	printf("unified_touch system=CXLfork bytes=%zu mode=%s iters=%d warmup=%d "
+	printf("unified_touch system=CXLfork policy=%s hot_stride=%" PRIu64
+	       " bytes=%zu mode=%s iters=%d warmup=%d "
 	       "fork_to_child_ns=%" PRIu64 " restore_ns=%" PRIu64
 	       " global_restore_ns=%" PRIu64 " touch_ns=%" PRIu64 " total_ns=%" PRIu64
 	       " pages=%zu faults=%" PRIu64 " checksum=%" PRIu64 " verify=ok\n",
-	       len, write_pages ? "write" : "read", iters, warmup,
+	       policy, hot_stride, len, write_pages ? "write" : "read", iters, warmup,
 	       avg_u64(fork_ns, iters), avg_u64(restore_ns, iters),
 	       avg_u64(global_restore_ns, iters), avg_u64(touch_ns, iters),
 	       avg_u64(total_ns, iters),
@@ -375,7 +392,7 @@ static void usage(const char *prog)
 		"usage:\n"
 		"  %s local <bytes> <iters> <warmup> <read|write>\n"
 		"  %s prepare <key> <bytes>\n"
-		"  %s resume <key> <bytes> <iters> <warmup> <read|write>\n",
+		"  %s resume <key> <bytes> <iters> <warmup> <read|write> [mow|moa|hybrid] [hot_stride_pages]\n",
 		prog, prog, prog);
 }
 
@@ -399,14 +416,19 @@ int main(int argc, char **argv)
 				   round_len(strtoull(argv[3], NULL, 0)));
 	}
 	if (argc >= 2 && !strcmp(argv[1], "resume")) {
-		if (argc != 7) {
+		const char *policy;
+		uint64_t hot_stride;
+
+		if (argc != 7 && argc != 8 && argc != 9) {
 			usage(argv[0]);
 			return 2;
 		}
+		policy = argc >= 8 ? argv[7] : "mow";
+		hot_stride = argc >= 9 ? strtoull(argv[8], NULL, 0) : 4;
 		return run_resume(strtoull(argv[2], NULL, 0),
 				  round_len(strtoull(argv[3], NULL, 0)),
 				  atoi(argv[4]), atoi(argv[5]),
-				  parse_write_mode(argv[6]));
+				  parse_write_mode(argv[6]), policy, hot_stride);
 	}
 	usage(argv[0]);
 	return 2;
