@@ -27,6 +27,10 @@ struct child_result {
 	uint64_t pte_image_validate_ns;
 	uint64_t pte_image_build_ns;
 	uint64_t pte_image_pages;
+	uint64_t pt_page_image_validate_ns;
+	uint64_t pt_page_image_build_ns;
+	uint64_t pt_page_image_pages;
+	uint64_t pt_page_image_entries;
 	uint64_t state_image_validate_ns;
 	uint64_t state_image_build_ns;
 	uint64_t state_image_pages;
@@ -267,12 +271,16 @@ static int run_prepare(uint64_t key, size_t len, int full_private)
 	}
 	printf("unified_touch_prepare key=%" PRIu64 " bytes=%zu prepare_ns=%" PRIu64
 	       " pte_image_build_ns=%" PRIu64 " pte_image_pages=%" PRIu64
+	       " pt_page_image_build_ns=%" PRIu64 " pt_page_image_pages=%" PRIu64
+	       " pt_page_image_entries=%" PRIu64
 	       " state_image_build_ns=%" PRIu64 " state_image_pages=%" PRIu64
 	       " private_rebase_ns=%" PRIu64 " private_rebase_entries=%" PRIu64
 	       " private_rebase_pages=%" PRIu64 " global_detach_ns=%" PRIu64
 	       " pages=%" PRIu64 " checksum=%" PRIu64 " verify=ok\n",
 	       key, len, op.checkpoint_ns, op.pte_image_build_ns,
-	       op.pte_image_pages, op.state_image_build_ns,
+	       op.pte_image_pages, op.pt_page_image_build_ns,
+	       op.pt_page_image_pages, op.pt_page_image_entries,
+	       op.state_image_build_ns,
 	       op.state_image_pages, op.private_rebase_ns,
 	       op.private_rebase_entries, op.private_rebase_pages,
 	       op.global_detach_ns, op.total_pages, checksum);
@@ -323,6 +331,10 @@ static int cxlfork_child(uint64_t key, size_t len, int write_pages,
 	res.pte_image_validate_ns = op.pte_image_validate_ns;
 	res.pte_image_build_ns = op.pte_image_build_ns;
 	res.pte_image_pages = op.pte_image_pages;
+	res.pt_page_image_validate_ns = op.pt_page_image_validate_ns;
+	res.pt_page_image_build_ns = op.pt_page_image_build_ns;
+	res.pt_page_image_pages = op.pt_page_image_pages;
+	res.pt_page_image_entries = op.pt_page_image_entries;
 	res.state_image_validate_ns = op.state_image_validate_ns;
 	res.state_image_build_ns = op.state_image_build_ns;
 	res.state_image_pages = op.state_image_pages;
@@ -353,6 +365,7 @@ static int run_resume(uint64_t key, size_t len, int iters, int warmup,
 	uint64_t *pte_attach_ns;
 	uint64_t *pte_attach_pages;
 	uint64_t *pte_image_validate_ns;
+	uint64_t *pt_page_image_validate_ns;
 	uint64_t *state_image_validate_ns;
 	uint64_t *private_rebase_validate_ns;
 	uint64_t *global_attach_ns;
@@ -368,6 +381,7 @@ static int run_resume(uint64_t key, size_t len, int iters, int warmup,
 	pte_attach_ns = calloc((size_t)iters, sizeof(*pte_attach_ns));
 	pte_attach_pages = calloc((size_t)iters, sizeof(*pte_attach_pages));
 	pte_image_validate_ns = calloc((size_t)iters, sizeof(*pte_image_validate_ns));
+	pt_page_image_validate_ns = calloc((size_t)iters, sizeof(*pt_page_image_validate_ns));
 	state_image_validate_ns = calloc((size_t)iters, sizeof(*state_image_validate_ns));
 	private_rebase_validate_ns = calloc((size_t)iters, sizeof(*private_rebase_validate_ns));
 	global_attach_ns = calloc((size_t)iters, sizeof(*global_attach_ns));
@@ -376,7 +390,7 @@ static int run_resume(uint64_t key, size_t len, int iters, int warmup,
 	faults = calloc((size_t)iters, sizeof(*faults));
 	if (!fork_ns || !restore_ns || !global_restore_ns || !pte_attach_ns ||
 	    !pte_attach_pages || !pte_image_validate_ns ||
-	    !state_image_validate_ns || !private_rebase_validate_ns ||
+	    !pt_page_image_validate_ns || !state_image_validate_ns || !private_rebase_validate_ns ||
 	    !global_attach_ns || !touch_ns || !total_ns || !faults) {
 		perror("calloc");
 		return 1;
@@ -425,6 +439,7 @@ static int run_resume(uint64_t key, size_t len, int iters, int warmup,
 			pte_attach_ns[measured] = res.pte_attach_ns;
 			pte_attach_pages[measured] = res.pte_attach_pages;
 			pte_image_validate_ns[measured] = res.pte_image_validate_ns;
+			pt_page_image_validate_ns[measured] = res.pt_page_image_validate_ns;
 			state_image_validate_ns[measured] = res.state_image_validate_ns;
 			private_rebase_validate_ns[measured] = res.private_rebase_validate_ns;
 			global_attach_ns[measured] = res.global_attach_ns;
@@ -440,6 +455,7 @@ static int run_resume(uint64_t key, size_t len, int iters, int warmup,
 	       "fork_to_child_ns=%" PRIu64 " restore_ns=%" PRIu64
 	       " global_restore_ns=%" PRIu64 " pte_attach_ns=%" PRIu64
 	       " pte_attach_pages=%" PRIu64 " pte_image_validate_ns=%" PRIu64
+	       " pt_page_image_validate_ns=%" PRIu64
 	       " state_image_validate_ns=%" PRIu64
 	       " private_rebase_validate_ns=%" PRIu64
 	       " global_attach_ns=%" PRIu64
@@ -450,6 +466,7 @@ static int run_resume(uint64_t key, size_t len, int iters, int warmup,
 	       avg_u64(global_restore_ns, iters), avg_u64(pte_attach_ns, iters),
 	       avg_u64(pte_attach_pages, iters),
 	       avg_u64(pte_image_validate_ns, iters),
+	       avg_u64(pt_page_image_validate_ns, iters),
 	       avg_u64(state_image_validate_ns, iters),
 	       avg_u64(private_rebase_validate_ns, iters),
 	       avg_u64(global_attach_ns, iters), avg_u64(touch_ns, iters),

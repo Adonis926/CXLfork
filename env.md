@@ -611,6 +611,7 @@ UAPI 里新增了 `pte_image_build_ns`、`pte_image_pages`、`state_image_build_
 - prepare 阶段在 CXL 中构建 state image，保存 restore 所需的 mm/thread/global/fd/VMA metadata。这个 state image 位于共享 CXL slot 内，VM1 restore 端直接读取和校验，而不是从 VM0 通过 socket/file 传输。
 - prepare 阶段在 CXL 中构建 private rebase image，把 private state 内部对象统一记录成 `id -> CXL offset -> CXL physical address -> bytes/entries`。当前包括 page data、leaf-PTE image、state image、region table 和 PTE table，VM1 restore 必须验证该表后才继续。
 - `CXLFORK_F_FULL_PRIVATE_STATE` 严格 private-state 模式会遍历进程全地址空间中的 eligible private VMAs，而不是只扫描 benchmark working set。它排除 shared/special VMAs，包含 private anonymous pages 和 private clean file-backed mappings（例如 library text/data pages），并通过 native memory copy 将这些页放到 CXL。
+- page-table metadata 进一步从 flat leaf-PTE image 扩展为 CXL-resident PTE page image：按 2MB PMD 范围生成 4KB PTE page，每页包含 512 个 raw PTE value；restore 会校验这些 page-table page images 后再 attach CXL pages。
 - task private image 已加入 CXL state image，记录 pid/tgid/ppid、comm、personality、task flags、调度 policy/priority、uid/gid/euid/egid/suid/sgid/fsuid/fsgid 和 capability masks。
 - prepare 阶段显式记录 global detach cost；restore 阶段显式记录 global attach cost。这里的 detach/attach 语义对应跨 VM 可执行策略：checkpoint 端把 cwd/root/rlimit/signal/namespace/fd path metadata 从 private checkpoint 中拆出为 global attach descriptors，restore 端在 VM1 OS 中重新 apply/reopen，而不是把源 VM 的 kernel object 指针带过去。
 - prepare 阶段在 CXL 中构建 leaf-PTE image，记录每个 checkpointed VA 对应的 CXL PFN/PTE value。
@@ -636,11 +637,11 @@ bash scripts/21-benchmark-unified-touch.sh
 ```text
 跨 VM MoW read:
 default 4MB working-set MoW read:
-prepare_ns=821780 pte_image_build_ns=4804 pte_image_pages=6 state_image_build_ns=1782 state_image_pages=3 private_rebase_ns=71 private_rebase_entries=5 private_rebase_pages=1 global_detach_ns=5618
-restore_ns=76994 global_restore_ns=11023 pte_attach_ns=62478 pte_attach_pages=1024 pte_image_validate_ns=13331 state_image_validate_ns=591 private_rebase_validate_ns=1503 global_attach_ns=11023 touch_ns=26858 faults=0
+prepare_ns=767289 pte_image_build_ns=4728 pte_image_pages=6 pt_page_image_build_ns=5115 pt_page_image_pages=3 pt_page_image_entries=2 state_image_build_ns=1643 state_image_pages=3 private_rebase_ns=493 private_rebase_entries=6 private_rebase_pages=1 global_detach_ns=5758
+restore_ns=70501 global_restore_ns=8614 pte_attach_ns=50760 pte_attach_pages=1024 pte_image_validate_ns=10223 pt_page_image_validate_ns=19033 state_image_validate_ns=469 private_rebase_validate_ns=1197 global_attach_ns=8614 touch_ns=20795 faults=0
 
 full private-state prepare smoke test:
-prepare_ns=1038263 pte_image_build_ns=8134 pte_image_pages=6 state_image_build_ns=2379 state_image_pages=3 private_rebase_ns=469 private_rebase_entries=5 private_rebase_pages=1 global_detach_ns=6596 pages=890
+prepare_ns=977786 pte_image_build_ns=6411 pte_image_pages=6 pt_page_image_build_ns=7637 pt_page_image_pages=7 pt_page_image_entries=6 state_image_build_ns=2737 state_image_pages=3 private_rebase_ns=326 private_rebase_entries=6 private_rebase_pages=1 global_detach_ns=4845 pages=890
 
 早前 tiering smoke test:
 mow:    prepare_ns=1039605 pte_image_build_ns=6315 pte_image_pages=6 restore_ns=51747 pte_attach_ns=43502 pte_attach_pages=1024 pte_image_validate_ns=8595 touch_ns=18350 faults=0
