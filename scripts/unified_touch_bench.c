@@ -27,6 +27,9 @@ struct child_result {
 	uint64_t pte_image_validate_ns;
 	uint64_t pte_image_build_ns;
 	uint64_t pte_image_pages;
+	uint64_t state_image_validate_ns;
+	uint64_t state_image_build_ns;
+	uint64_t state_image_pages;
 	uint64_t touch_ns;
 	uint64_t total_child_ns;
 	uint64_t checksum;
@@ -252,9 +255,11 @@ static int run_prepare(uint64_t key, size_t len)
 	}
 	printf("unified_touch_prepare key=%" PRIu64 " bytes=%zu prepare_ns=%" PRIu64
 	       " pte_image_build_ns=%" PRIu64 " pte_image_pages=%" PRIu64
+	       " state_image_build_ns=%" PRIu64 " state_image_pages=%" PRIu64
 	       " pages=%" PRIu64 " checksum=%" PRIu64 " verify=ok\n",
 	       key, len, op.checkpoint_ns, op.pte_image_build_ns,
-	       op.pte_image_pages, op.total_pages, checksum);
+	       op.pte_image_pages, op.state_image_build_ns,
+	       op.state_image_pages, op.total_pages, checksum);
 	close(fd);
 	return 0;
 }
@@ -302,6 +307,9 @@ static int cxlfork_child(uint64_t key, size_t len, int write_pages,
 	res.pte_image_validate_ns = op.pte_image_validate_ns;
 	res.pte_image_build_ns = op.pte_image_build_ns;
 	res.pte_image_pages = op.pte_image_pages;
+	res.state_image_validate_ns = op.state_image_validate_ns;
+	res.state_image_build_ns = op.state_image_build_ns;
+	res.state_image_pages = op.state_image_pages;
 	(void)read_stats(fd, key, &before_faults);
 	touch_begin = nsec_now();
 	res.checksum = touch_pages(DEFAULT_BASE, len, write_pages);
@@ -323,6 +331,7 @@ static int run_resume(uint64_t key, size_t len, int iters, int warmup,
 	uint64_t *pte_attach_ns;
 	uint64_t *pte_attach_pages;
 	uint64_t *pte_image_validate_ns;
+	uint64_t *state_image_validate_ns;
 	uint64_t *touch_ns;
 	uint64_t *total_ns;
 	uint64_t *faults;
@@ -335,12 +344,13 @@ static int run_resume(uint64_t key, size_t len, int iters, int warmup,
 	pte_attach_ns = calloc((size_t)iters, sizeof(*pte_attach_ns));
 	pte_attach_pages = calloc((size_t)iters, sizeof(*pte_attach_pages));
 	pte_image_validate_ns = calloc((size_t)iters, sizeof(*pte_image_validate_ns));
+	state_image_validate_ns = calloc((size_t)iters, sizeof(*state_image_validate_ns));
 	touch_ns = calloc((size_t)iters, sizeof(*touch_ns));
 	total_ns = calloc((size_t)iters, sizeof(*total_ns));
 	faults = calloc((size_t)iters, sizeof(*faults));
 	if (!fork_ns || !restore_ns || !global_restore_ns || !pte_attach_ns ||
-	    !pte_attach_pages || !pte_image_validate_ns || !touch_ns ||
-	    !total_ns || !faults) {
+	    !pte_attach_pages || !pte_image_validate_ns ||
+	    !state_image_validate_ns || !touch_ns || !total_ns || !faults) {
 		perror("calloc");
 		return 1;
 	}
@@ -388,6 +398,7 @@ static int run_resume(uint64_t key, size_t len, int iters, int warmup,
 			pte_attach_ns[measured] = res.pte_attach_ns;
 			pte_attach_pages[measured] = res.pte_attach_pages;
 			pte_image_validate_ns[measured] = res.pte_image_validate_ns;
+			state_image_validate_ns[measured] = res.state_image_validate_ns;
 			touch_ns[measured] = res.touch_ns;
 			total_ns[measured] = nsec_now() - begin;
 			faults[measured] = res.faults;
@@ -400,13 +411,15 @@ static int run_resume(uint64_t key, size_t len, int iters, int warmup,
 	       "fork_to_child_ns=%" PRIu64 " restore_ns=%" PRIu64
 	       " global_restore_ns=%" PRIu64 " pte_attach_ns=%" PRIu64
 	       " pte_attach_pages=%" PRIu64 " pte_image_validate_ns=%" PRIu64
+	       " state_image_validate_ns=%" PRIu64
 	       " touch_ns=%" PRIu64 " total_ns=%" PRIu64
 	       " pages=%zu faults=%" PRIu64 " checksum=%" PRIu64 " verify=ok\n",
 	       policy, hot_stride, len, write_pages ? "write" : "read", iters, warmup,
 	       avg_u64(fork_ns, iters), avg_u64(restore_ns, iters),
 	       avg_u64(global_restore_ns, iters), avg_u64(pte_attach_ns, iters),
 	       avg_u64(pte_attach_pages, iters),
-	       avg_u64(pte_image_validate_ns, iters), avg_u64(touch_ns, iters),
+	       avg_u64(pte_image_validate_ns, iters),
+	       avg_u64(state_image_validate_ns, iters), avg_u64(touch_ns, iters),
 	       avg_u64(total_ns, iters),
 	       len / PAGE_SIZE_LOCAL, avg_u64(faults, iters), checksum);
 	return 0;
