@@ -17,6 +17,7 @@ MODES=${MODES:-"read write"}
 POLICIES=${POLICIES:-"mow moa hybrid"}
 HYBRID_HOT_STRIDE=${HYBRID_HOT_STRIDE:-4}
 RUN_LOCAL=${RUN_LOCAL:-1}
+CXLFORK_BUILTIN=${CXLFORK_BUILTIN:-1}
 DIR=${DIR:-/tmp/cxlfork-unified-touch}
 OUT=${OUT:-$WS/results/unified-touch-$(date +%Y%m%d-%H%M%S).csv}
 SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
@@ -53,8 +54,10 @@ field() {
 build() {
 	gcc -O2 -Wall -Wextra -I"$CXLFORK_KERNEL/samples/cxlfork" \
 		-o "$WS/scripts/unified_touch_bench" "$WS/scripts/unified_touch_bench.c"
-	make -C "$KBUILD" M="$CXLFORK_KERNEL/drivers/cxlfork" CONFIG_CXLFORK=m \
-		KBUILD_MODPOST_WARN=1 modules >/tmp/cxlfork_unified_module.log
+	if [[ "$CXLFORK_BUILTIN" != "1" ]]; then
+		make -C "$KBUILD" M="$CXLFORK_KERNEL/drivers/cxlfork" CONFIG_CXLFORK=m \
+			KBUILD_MODPOST_WARN=1 modules >/tmp/cxlfork_unified_module.log
+	fi
 }
 
 deploy() {
@@ -66,10 +69,15 @@ deploy() {
 	fi
 	for port in "$VM0_PORT" "$VM1_PORT"; do
 		vm_ssh "$port" "mkdir -p '$DIR'"
-		vm_scp "$port" "$WS/scripts/unified_touch_bench" \
-			"$CXLFORK_KERNEL/drivers/cxlfork/cxlfork.ko" \
-			ubuntu@localhost:"$DIR/" >/dev/null
-		vm_ssh "$port" "cd '$DIR' && sudo rmmod cxlfork 2>/dev/null || true; sudo insmod ./cxlfork.ko cxl_phys='$CXL_PHYS' cxl_size='$CXL_SIZE' && sudo chmod 666 /dev/cxlfork"
+		if vm_ssh "$port" "test -e /dev/cxlfork"; then
+			vm_scp "$port" "$WS/scripts/unified_touch_bench" ubuntu@localhost:"$DIR/" >/dev/null
+			vm_ssh "$port" "sudo chmod 666 /dev/cxlfork"
+		else
+			vm_scp "$port" "$WS/scripts/unified_touch_bench" \
+				"$CXLFORK_KERNEL/drivers/cxlfork/cxlfork.ko" \
+				ubuntu@localhost:"$DIR/" >/dev/null
+			vm_ssh "$port" "cd '$DIR' && sudo rmmod cxlfork 2>/dev/null || true; sudo insmod ./cxlfork.ko cxl_phys='$CXL_PHYS' cxl_size='$CXL_SIZE' && sudo chmod 666 /dev/cxlfork"
+		fi
 	done
 }
 
