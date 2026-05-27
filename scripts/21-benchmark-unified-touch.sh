@@ -74,7 +74,7 @@ deploy() {
 }
 
 csv_header() {
-	printf 'system,policy,hot_stride_pages,bytes,mode,iters,warmup,key,prepare_ns,fork_to_child_ns,restore_ns,global_restore_ns,touch_ns,total_ns,full_ns,pages,faults,notes\n'
+	printf 'system,policy,hot_stride_pages,bytes,mode,iters,warmup,key,prepare_ns,fork_to_child_ns,restore_ns,global_restore_ns,pte_attach_ns,pte_attach_pages,touch_ns,total_ns,full_ns,pages,faults,notes\n'
 }
 
 run_local() {
@@ -87,7 +87,7 @@ run_local() {
 	touch_ns=$(field "$out" touch_ns)
 	total_ns=$(field "$out" total_ns)
 	pages=$(field "$out" pages)
-	printf 'LocalFork,local,0,%s,%s,%s,%s,NA,0,%s,0,0,%s,%s,%s,%s,NA,same volatile per-page touch loop\n' \
+	printf 'LocalFork,local,0,%s,%s,%s,%s,NA,0,%s,0,0,0,0,%s,%s,%s,%s,NA,same volatile per-page touch loop\n' \
 		"$bytes" "$mode" "$ITERS" "$WARMUP" "$fork_ns" "$touch_ns" "$total_ns" "$total_ns" "$pages" >>"$OUT"
 	printf '[LocalFork] bytes=%s mode=%s fork_ns=%s touch_ns=%s total_ns=%s\n' \
 		"$bytes" "$mode" "$fork_ns" "$touch_ns" "$total_ns"
@@ -99,7 +99,7 @@ run_cxlfork() {
 	local key=$3
 	local policy=$4
 	local prep_out resume_out prepare_ns fork_ns restore_ns touch_ns total_ns full_ns pages faults
-	local global_restore_ns hot_stride
+	local global_restore_ns pte_attach_ns pte_attach_pages hot_stride
 
 	hot_stride=0
 	if [[ "$policy" == "hybrid" ]]; then
@@ -112,15 +112,17 @@ run_cxlfork() {
 	fork_ns=$(field "$resume_out" fork_to_child_ns)
 	restore_ns=$(field "$resume_out" restore_ns)
 	global_restore_ns=$(field "$resume_out" global_restore_ns)
+	pte_attach_ns=$(field "$resume_out" pte_attach_ns)
+	pte_attach_pages=$(field "$resume_out" pte_attach_pages)
 	touch_ns=$(field "$resume_out" touch_ns)
 	total_ns=$(field "$resume_out" total_ns)
 	faults=$(field "$resume_out" faults)
 	full_ns=$((prepare_ns + total_ns))
-	printf 'CXLfork,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,tiering policy comparison with global state\n' \
+	printf 'CXLfork,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,tiering policy comparison with CXL PTE attach breakdown\n' \
 		"$policy" "$hot_stride" "$bytes" "$mode" "$ITERS" "$WARMUP" "$key" "$prepare_ns" "$fork_ns" "$restore_ns" \
-		"$global_restore_ns" "$touch_ns" "$total_ns" "$full_ns" "$pages" "$faults" >>"$OUT"
-	printf '[CXLfork] policy=%s hot_stride=%s bytes=%s mode=%s prepare_ns=%s restore_ns=%s global_restore_ns=%s touch_ns=%s total_ns=%s full_ns=%s faults=%s\n' \
-		"$policy" "$hot_stride" "$bytes" "$mode" "$prepare_ns" "$restore_ns" "$global_restore_ns" "$touch_ns" "$total_ns" "$full_ns" "$faults"
+		"$global_restore_ns" "$pte_attach_ns" "$pte_attach_pages" "$touch_ns" "$total_ns" "$full_ns" "$pages" "$faults" >>"$OUT"
+	printf '[CXLfork] policy=%s hot_stride=%s bytes=%s mode=%s prepare_ns=%s restore_ns=%s global_restore_ns=%s pte_attach_ns=%s pte_attach_pages=%s touch_ns=%s total_ns=%s full_ns=%s faults=%s\n' \
+		"$policy" "$hot_stride" "$bytes" "$mode" "$prepare_ns" "$restore_ns" "$global_restore_ns" "$pte_attach_ns" "$pte_attach_pages" "$touch_ns" "$total_ns" "$full_ns" "$faults"
 }
 
 main() {

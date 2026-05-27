@@ -22,6 +22,8 @@ struct child_result {
 	uint64_t child_start_ns;
 	uint64_t restore_ns;
 	uint64_t global_restore_ns;
+	uint64_t pte_attach_ns;
+	uint64_t pte_attach_pages;
 	uint64_t touch_ns;
 	uint64_t total_child_ns;
 	uint64_t checksum;
@@ -290,6 +292,8 @@ static int cxlfork_child(uint64_t key, size_t len, int write_pages,
 		_exit(2);
 	res.restore_ns = op.restore_ns ? op.restore_ns : nsec_now() - begin;
 	res.global_restore_ns = op.global_restore_ns;
+	res.pte_attach_ns = op.pte_attach_ns;
+	res.pte_attach_pages = op.pte_attach_pages;
 	(void)read_stats(fd, key, &before_faults);
 	touch_begin = nsec_now();
 	res.checksum = touch_pages(DEFAULT_BASE, len, write_pages);
@@ -308,6 +312,8 @@ static int run_resume(uint64_t key, size_t len, int iters, int warmup,
 	uint64_t *fork_ns;
 	uint64_t *restore_ns;
 	uint64_t *global_restore_ns;
+	uint64_t *pte_attach_ns;
+	uint64_t *pte_attach_pages;
 	uint64_t *touch_ns;
 	uint64_t *total_ns;
 	uint64_t *faults;
@@ -317,11 +323,13 @@ static int run_resume(uint64_t key, size_t len, int iters, int warmup,
 	fork_ns = calloc((size_t)iters, sizeof(*fork_ns));
 	restore_ns = calloc((size_t)iters, sizeof(*restore_ns));
 	global_restore_ns = calloc((size_t)iters, sizeof(*global_restore_ns));
+	pte_attach_ns = calloc((size_t)iters, sizeof(*pte_attach_ns));
+	pte_attach_pages = calloc((size_t)iters, sizeof(*pte_attach_pages));
 	touch_ns = calloc((size_t)iters, sizeof(*touch_ns));
 	total_ns = calloc((size_t)iters, sizeof(*total_ns));
 	faults = calloc((size_t)iters, sizeof(*faults));
-	if (!fork_ns || !restore_ns || !global_restore_ns || !touch_ns ||
-	    !total_ns || !faults) {
+	if (!fork_ns || !restore_ns || !global_restore_ns || !pte_attach_ns ||
+	    !pte_attach_pages || !touch_ns || !total_ns || !faults) {
 		perror("calloc");
 		return 1;
 	}
@@ -366,6 +374,8 @@ static int run_resume(uint64_t key, size_t len, int iters, int warmup,
 			fork_ns[measured] = res.child_start_ns - begin;
 			restore_ns[measured] = res.restore_ns;
 			global_restore_ns[measured] = res.global_restore_ns;
+			pte_attach_ns[measured] = res.pte_attach_ns;
+			pte_attach_pages[measured] = res.pte_attach_pages;
 			touch_ns[measured] = res.touch_ns;
 			total_ns[measured] = nsec_now() - begin;
 			faults[measured] = res.faults;
@@ -376,11 +386,13 @@ static int run_resume(uint64_t key, size_t len, int iters, int warmup,
 	printf("unified_touch system=CXLfork policy=%s hot_stride=%" PRIu64
 	       " bytes=%zu mode=%s iters=%d warmup=%d "
 	       "fork_to_child_ns=%" PRIu64 " restore_ns=%" PRIu64
-	       " global_restore_ns=%" PRIu64 " touch_ns=%" PRIu64 " total_ns=%" PRIu64
+	       " global_restore_ns=%" PRIu64 " pte_attach_ns=%" PRIu64
+	       " pte_attach_pages=%" PRIu64 " touch_ns=%" PRIu64 " total_ns=%" PRIu64
 	       " pages=%zu faults=%" PRIu64 " checksum=%" PRIu64 " verify=ok\n",
 	       policy, hot_stride, len, write_pages ? "write" : "read", iters, warmup,
 	       avg_u64(fork_ns, iters), avg_u64(restore_ns, iters),
-	       avg_u64(global_restore_ns, iters), avg_u64(touch_ns, iters),
+	       avg_u64(global_restore_ns, iters), avg_u64(pte_attach_ns, iters),
+	       avg_u64(pte_attach_pages, iters), avg_u64(touch_ns, iters),
 	       avg_u64(total_ns, iters),
 	       len / PAGE_SIZE_LOCAL, avg_u64(faults, iters), checksum);
 	return 0;
