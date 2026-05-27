@@ -611,7 +611,7 @@ UAPI 里新增了 `pte_image_build_ns`、`pte_image_pages`、`state_image_build_
 - prepare 阶段在 CXL 中构建 state image，保存 restore 所需的 mm/thread/global/fd/VMA metadata。这个 state image 位于共享 CXL slot 内，VM1 restore 端直接读取和校验，而不是从 VM0 通过 socket/file 传输。
 - prepare 阶段在 CXL 中构建 private rebase image，把 private state 内部对象统一记录成 `id -> CXL offset -> CXL physical address -> bytes/entries`。当前包括 page data、leaf-PTE image、state image、region table 和 PTE table，VM1 restore 必须验证该表后才继续。
 - `CXLFORK_F_FULL_PRIVATE_STATE` 严格 private-state 模式会遍历进程全地址空间中的 eligible private VMAs，而不是只扫描 benchmark working set。它排除 shared/special VMAs，包含 private anonymous pages 和 private clean file-backed mappings（例如 library text/data pages），并通过 native memory copy 将这些页放到 CXL。
-- page-table metadata 进一步从 flat leaf-PTE image 扩展为 CXL-resident PTE page image：按 2MB PMD 范围生成 4KB PTE page，每页包含 512 个 raw PTE value；restore 会校验这些 page-table page images 后再 attach CXL pages。
+- page-table metadata 进一步从 flat leaf-PTE image 扩展为 CXL-resident PTE page image：按 2MB PMD 范围生成 4KB PTE page，每页包含 512 个 raw PTE value。restore 会先校验这些 page-table page images，再从该 image 解析连续 PFN run，并按 run 安装 CXL-backed PTE mapping；`direct_pte_install_ns/pages` 单独记录这个更严格的 PTE install 路径。
 - task private image 已加入 CXL state image，记录 pid/tgid/ppid、comm、personality、task flags、调度 policy/priority、uid/gid/euid/egid/suid/sgid/fsuid/fsgid 和 capability masks。
 - prepare 阶段显式记录 global detach cost；restore 阶段显式记录 global attach cost。这里的 detach/attach 语义对应跨 VM 可执行策略：checkpoint 端把 cwd/root/rlimit/signal/namespace/fd path metadata 从 private checkpoint 中拆出为 global attach descriptors，restore 端在 VM1 OS 中重新 apply/reopen，而不是把源 VM 的 kernel object 指针带过去。
 - prepare 阶段在 CXL 中构建 leaf-PTE image，记录每个 checkpointed VA 对应的 CXL PFN/PTE value。
@@ -637,8 +637,8 @@ bash scripts/21-benchmark-unified-touch.sh
 ```text
 跨 VM MoW read:
 default 4MB working-set MoW read:
-prepare_ns=767289 pte_image_build_ns=4728 pte_image_pages=6 pt_page_image_build_ns=5115 pt_page_image_pages=3 pt_page_image_entries=2 state_image_build_ns=1643 state_image_pages=3 private_rebase_ns=493 private_rebase_entries=6 private_rebase_pages=1 global_detach_ns=5758
-restore_ns=70501 global_restore_ns=8614 pte_attach_ns=50760 pte_attach_pages=1024 pte_image_validate_ns=10223 pt_page_image_validate_ns=19033 state_image_validate_ns=469 private_rebase_validate_ns=1197 global_attach_ns=8614 touch_ns=20795 faults=0
+prepare_ns=803725 pte_image_build_ns=4593 pte_image_pages=6 pt_page_image_build_ns=5251 pt_page_image_pages=3 pt_page_image_entries=2 state_image_build_ns=1625 state_image_pages=3 private_rebase_ns=272 private_rebase_entries=6 private_rebase_pages=1 global_detach_ns=5075
+restore_ns=133147 global_restore_ns=11395 pte_attach_ns=107796 pte_attach_pages=1024 direct_pte_install_ns=58963 direct_pte_install_pages=1024 pte_image_validate_ns=29205 pt_page_image_validate_ns=11059 state_image_validate_ns=397 private_rebase_validate_ns=452 global_attach_ns=11395 touch_ns=28203 faults=0
 
 full private-state prepare smoke test:
 prepare_ns=977786 pte_image_build_ns=6411 pte_image_pages=6 pt_page_image_build_ns=7637 pt_page_image_pages=7 pt_page_image_entries=6 state_image_build_ns=2737 state_image_pages=3 private_rebase_ns=326 private_rebase_entries=6 private_rebase_pages=1 global_detach_ns=4845 pages=890

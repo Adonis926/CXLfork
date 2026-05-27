@@ -24,6 +24,8 @@ struct child_result {
 	uint64_t global_restore_ns;
 	uint64_t pte_attach_ns;
 	uint64_t pte_attach_pages;
+	uint64_t direct_pte_install_ns;
+	uint64_t direct_pte_install_pages;
 	uint64_t pte_image_validate_ns;
 	uint64_t pte_image_build_ns;
 	uint64_t pte_image_pages;
@@ -328,6 +330,8 @@ static int cxlfork_child(uint64_t key, size_t len, int write_pages,
 	res.global_restore_ns = op.global_restore_ns;
 	res.pte_attach_ns = op.pte_attach_ns;
 	res.pte_attach_pages = op.pte_attach_pages;
+	res.direct_pte_install_ns = op.direct_pte_install_ns;
+	res.direct_pte_install_pages = op.direct_pte_install_pages;
 	res.pte_image_validate_ns = op.pte_image_validate_ns;
 	res.pte_image_build_ns = op.pte_image_build_ns;
 	res.pte_image_pages = op.pte_image_pages;
@@ -364,6 +368,8 @@ static int run_resume(uint64_t key, size_t len, int iters, int warmup,
 	uint64_t *global_restore_ns;
 	uint64_t *pte_attach_ns;
 	uint64_t *pte_attach_pages;
+	uint64_t *direct_pte_install_ns;
+	uint64_t *direct_pte_install_pages;
 	uint64_t *pte_image_validate_ns;
 	uint64_t *pt_page_image_validate_ns;
 	uint64_t *state_image_validate_ns;
@@ -380,6 +386,8 @@ static int run_resume(uint64_t key, size_t len, int iters, int warmup,
 	global_restore_ns = calloc((size_t)iters, sizeof(*global_restore_ns));
 	pte_attach_ns = calloc((size_t)iters, sizeof(*pte_attach_ns));
 	pte_attach_pages = calloc((size_t)iters, sizeof(*pte_attach_pages));
+	direct_pte_install_ns = calloc((size_t)iters, sizeof(*direct_pte_install_ns));
+	direct_pte_install_pages = calloc((size_t)iters, sizeof(*direct_pte_install_pages));
 	pte_image_validate_ns = calloc((size_t)iters, sizeof(*pte_image_validate_ns));
 	pt_page_image_validate_ns = calloc((size_t)iters, sizeof(*pt_page_image_validate_ns));
 	state_image_validate_ns = calloc((size_t)iters, sizeof(*state_image_validate_ns));
@@ -389,7 +397,8 @@ static int run_resume(uint64_t key, size_t len, int iters, int warmup,
 	total_ns = calloc((size_t)iters, sizeof(*total_ns));
 	faults = calloc((size_t)iters, sizeof(*faults));
 	if (!fork_ns || !restore_ns || !global_restore_ns || !pte_attach_ns ||
-	    !pte_attach_pages || !pte_image_validate_ns ||
+	    !pte_attach_pages || !direct_pte_install_ns ||
+	    !direct_pte_install_pages || !pte_image_validate_ns ||
 	    !pt_page_image_validate_ns || !state_image_validate_ns || !private_rebase_validate_ns ||
 	    !global_attach_ns || !touch_ns || !total_ns || !faults) {
 		perror("calloc");
@@ -438,6 +447,8 @@ static int run_resume(uint64_t key, size_t len, int iters, int warmup,
 			global_restore_ns[measured] = res.global_restore_ns;
 			pte_attach_ns[measured] = res.pte_attach_ns;
 			pte_attach_pages[measured] = res.pte_attach_pages;
+			direct_pte_install_ns[measured] = res.direct_pte_install_ns;
+			direct_pte_install_pages[measured] = res.direct_pte_install_pages;
 			pte_image_validate_ns[measured] = res.pte_image_validate_ns;
 			pt_page_image_validate_ns[measured] = res.pt_page_image_validate_ns;
 			state_image_validate_ns[measured] = res.state_image_validate_ns;
@@ -454,7 +465,9 @@ static int run_resume(uint64_t key, size_t len, int iters, int warmup,
 	       " bytes=%zu mode=%s iters=%d warmup=%d "
 	       "fork_to_child_ns=%" PRIu64 " restore_ns=%" PRIu64
 	       " global_restore_ns=%" PRIu64 " pte_attach_ns=%" PRIu64
-	       " pte_attach_pages=%" PRIu64 " pte_image_validate_ns=%" PRIu64
+	       " pte_attach_pages=%" PRIu64 " direct_pte_install_ns=%" PRIu64
+	       " direct_pte_install_pages=%" PRIu64
+	       " pte_image_validate_ns=%" PRIu64
 	       " pt_page_image_validate_ns=%" PRIu64
 	       " state_image_validate_ns=%" PRIu64
 	       " private_rebase_validate_ns=%" PRIu64
@@ -465,6 +478,8 @@ static int run_resume(uint64_t key, size_t len, int iters, int warmup,
 	       avg_u64(fork_ns, iters), avg_u64(restore_ns, iters),
 	       avg_u64(global_restore_ns, iters), avg_u64(pte_attach_ns, iters),
 	       avg_u64(pte_attach_pages, iters),
+	       avg_u64(direct_pte_install_ns, iters),
+	       avg_u64(direct_pte_install_pages, iters),
 	       avg_u64(pte_image_validate_ns, iters),
 	       avg_u64(pt_page_image_validate_ns, iters),
 	       avg_u64(state_image_validate_ns, iters),
