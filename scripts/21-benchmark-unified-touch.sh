@@ -74,7 +74,7 @@ deploy() {
 }
 
 csv_header() {
-	printf 'system,policy,hot_stride_pages,bytes,mode,iters,warmup,key,prepare_ns,pte_image_build_ns,pte_image_pages,state_image_build_ns,state_image_pages,fork_to_child_ns,restore_ns,global_restore_ns,pte_attach_ns,pte_attach_pages,pte_image_validate_ns,state_image_validate_ns,touch_ns,total_ns,full_ns,pages,faults,notes\n'
+	printf 'system,policy,hot_stride_pages,bytes,mode,iters,warmup,key,prepare_ns,pte_image_build_ns,pte_image_pages,state_image_build_ns,state_image_pages,private_rebase_ns,private_rebase_entries,private_rebase_pages,global_detach_ns,fork_to_child_ns,restore_ns,global_restore_ns,pte_attach_ns,pte_attach_pages,pte_image_validate_ns,state_image_validate_ns,private_rebase_validate_ns,global_attach_ns,touch_ns,total_ns,full_ns,pages,faults,notes\n'
 }
 
 run_local() {
@@ -87,7 +87,8 @@ run_local() {
 	touch_ns=$(field "$out" touch_ns)
 	total_ns=$(field "$out" total_ns)
 	pages=$(field "$out" pages)
-	printf 'LocalFork,local,0,%s,%s,%s,%s,NA,0,0,0,0,0,%s,0,0,0,0,0,0,%s,%s,%s,%s,NA,same volatile per-page touch loop\n' \
+	printf 'LocalFork,local,0,%s,%s,%s,%s,NA,0,0,0,0,0,0,0,0,0,%s,0,0,0,0,0,0,0,0,%s,%s,%s,%s,NA,same volatile per-page touch loop
+' \
 		"$bytes" "$mode" "$ITERS" "$WARMUP" "$fork_ns" "$touch_ns" "$total_ns" "$total_ns" "$pages" >>"$OUT"
 	printf '[LocalFork] bytes=%s mode=%s fork_ns=%s touch_ns=%s total_ns=%s\n' \
 		"$bytes" "$mode" "$fork_ns" "$touch_ns" "$total_ns"
@@ -98,9 +99,9 @@ run_cxlfork() {
 	local mode=$2
 	local key=$3
 	local policy=$4
-	local prep_out resume_out prepare_ns pte_image_build_ns pte_image_pages state_image_build_ns state_image_pages
+	local prep_out resume_out prepare_ns pte_image_build_ns pte_image_pages state_image_build_ns state_image_pages private_rebase_ns private_rebase_entries private_rebase_pages global_detach_ns
 	local fork_ns restore_ns touch_ns total_ns full_ns pages faults
-	local global_restore_ns pte_attach_ns pte_attach_pages pte_image_validate_ns state_image_validate_ns hot_stride
+	local global_restore_ns pte_attach_ns pte_attach_pages pte_image_validate_ns state_image_validate_ns private_rebase_validate_ns global_attach_ns hot_stride
 
 	hot_stride=0
 	if [[ "$policy" == "hybrid" ]]; then
@@ -113,6 +114,10 @@ run_cxlfork() {
 	pte_image_pages=$(field "$prep_out" pte_image_pages)
 	state_image_build_ns=$(field "$prep_out" state_image_build_ns)
 	state_image_pages=$(field "$prep_out" state_image_pages)
+	private_rebase_ns=$(field "$prep_out" private_rebase_ns)
+	private_rebase_entries=$(field "$prep_out" private_rebase_entries)
+	private_rebase_pages=$(field "$prep_out" private_rebase_pages)
+	global_detach_ns=$(field "$prep_out" global_detach_ns)
 	pages=$(field "$prep_out" pages)
 	fork_ns=$(field "$resume_out" fork_to_child_ns)
 	restore_ns=$(field "$resume_out" restore_ns)
@@ -121,15 +126,17 @@ run_cxlfork() {
 	pte_attach_pages=$(field "$resume_out" pte_attach_pages)
 	pte_image_validate_ns=$(field "$resume_out" pte_image_validate_ns)
 	state_image_validate_ns=$(field "$resume_out" state_image_validate_ns)
+	private_rebase_validate_ns=$(field "$resume_out" private_rebase_validate_ns)
+	global_attach_ns=$(field "$resume_out" global_attach_ns)
 	touch_ns=$(field "$resume_out" touch_ns)
 	total_ns=$(field "$resume_out" total_ns)
 	faults=$(field "$resume_out" faults)
 	full_ns=$((prepare_ns + total_ns))
-	printf 'CXLfork,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,tiering policy comparison with CXL state/PTE image attach breakdown\n' \
-		"$policy" "$hot_stride" "$bytes" "$mode" "$ITERS" "$WARMUP" "$key" "$prepare_ns" "$pte_image_build_ns" "$pte_image_pages" "$state_image_build_ns" "$state_image_pages" "$fork_ns" "$restore_ns" \
-		"$global_restore_ns" "$pte_attach_ns" "$pte_attach_pages" "$pte_image_validate_ns" "$state_image_validate_ns" "$touch_ns" "$total_ns" "$full_ns" "$pages" "$faults" >>"$OUT"
-	printf '[CXLfork] policy=%s hot_stride=%s bytes=%s mode=%s prepare_ns=%s pte_image_build_ns=%s pte_image_pages=%s state_image_build_ns=%s state_image_pages=%s restore_ns=%s global_restore_ns=%s pte_attach_ns=%s pte_attach_pages=%s pte_image_validate_ns=%s state_image_validate_ns=%s touch_ns=%s total_ns=%s full_ns=%s faults=%s\n' \
-		"$policy" "$hot_stride" "$bytes" "$mode" "$prepare_ns" "$pte_image_build_ns" "$pte_image_pages" "$state_image_build_ns" "$state_image_pages" "$restore_ns" "$global_restore_ns" "$pte_attach_ns" "$pte_attach_pages" "$pte_image_validate_ns" "$state_image_validate_ns" "$touch_ns" "$total_ns" "$full_ns" "$faults"
+	printf 'CXLfork,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,tiering policy comparison with CXL state/PTE image attach breakdown\n' \
+		"$policy" "$hot_stride" "$bytes" "$mode" "$ITERS" "$WARMUP" "$key" "$prepare_ns" "$pte_image_build_ns" "$pte_image_pages" "$state_image_build_ns" "$state_image_pages" "$private_rebase_ns" "$private_rebase_entries" "$private_rebase_pages" "$global_detach_ns" "$fork_ns" "$restore_ns" \
+		"$global_restore_ns" "$pte_attach_ns" "$pte_attach_pages" "$pte_image_validate_ns" "$state_image_validate_ns" "$private_rebase_validate_ns" "$global_attach_ns" "$touch_ns" "$total_ns" "$full_ns" "$pages" "$faults" >>"$OUT"
+	printf '[CXLfork] policy=%s hot_stride=%s bytes=%s mode=%s prepare_ns=%s pte_image_build_ns=%s pte_image_pages=%s state_image_build_ns=%s state_image_pages=%s private_rebase_ns=%s private_rebase_entries=%s private_rebase_pages=%s global_detach_ns=%s restore_ns=%s global_restore_ns=%s pte_attach_ns=%s pte_attach_pages=%s pte_image_validate_ns=%s state_image_validate_ns=%s private_rebase_validate_ns=%s global_attach_ns=%s touch_ns=%s total_ns=%s full_ns=%s faults=%s\n' \
+		"$policy" "$hot_stride" "$bytes" "$mode" "$prepare_ns" "$pte_image_build_ns" "$pte_image_pages" "$state_image_build_ns" "$state_image_pages" "$private_rebase_ns" "$private_rebase_entries" "$private_rebase_pages" "$global_detach_ns" "$restore_ns" "$global_restore_ns" "$pte_attach_ns" "$pte_attach_pages" "$pte_image_validate_ns" "$state_image_validate_ns" "$private_rebase_validate_ns" "$global_attach_ns" "$touch_ns" "$total_ns" "$full_ns" "$faults"
 }
 
 main() {
