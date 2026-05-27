@@ -234,7 +234,7 @@ static int run_local(size_t len, int iters, int warmup, int write_pages)
 	return 0;
 }
 
-static int run_prepare(uint64_t key, size_t len)
+static int run_prepare(uint64_t key, size_t len, int full_private)
 {
 	struct cxlfork_checkpoint op;
 	struct cxlfork_release rel = { .key = key };
@@ -252,8 +252,14 @@ static int run_prepare(uint64_t key, size_t len)
 	(void)ioctl(fd, CXLFORK_RELEASE, &rel);
 	memset(&op, 0, sizeof(op));
 	op.key = key;
-	op.scan_start = (uintptr_t)DEFAULT_BASE;
-	op.scan_end = (uintptr_t)DEFAULT_BASE + len;
+	if (full_private) {
+		op.flags = CXLFORK_F_FULL_PRIVATE_STATE;
+		op.scan_start = 0;
+		op.scan_end = 0;
+	} else {
+		op.scan_start = (uintptr_t)DEFAULT_BASE;
+		op.scan_end = (uintptr_t)DEFAULT_BASE + len;
+	}
 	if (ioctl(fd, CXLFORK_FORK_PREPARE, &op)) {
 		perror("CXLFORK_FORK_PREPARE");
 		close(fd);
@@ -457,7 +463,7 @@ static void usage(const char *prog)
 	fprintf(stderr,
 		"usage:\n"
 		"  %s local <bytes> <iters> <warmup> <read|write>\n"
-		"  %s prepare <key> <bytes>\n"
+		"  %s prepare <key> <bytes> [full-private]\n"
 		"  %s resume <key> <bytes> <iters> <warmup> <read|write> [mow|moa|hybrid] [hot_stride_pages]\n",
 		prog, prog, prog);
 }
@@ -474,12 +480,13 @@ int main(int argc, char **argv)
 				 parse_write_mode(argv[5]));
 	}
 	if (argc >= 2 && !strcmp(argv[1], "prepare")) {
-		if (argc != 4) {
+		if (argc != 4 && argc != 5) {
 			usage(argv[0]);
 			return 2;
 		}
 		return run_prepare(strtoull(argv[2], NULL, 0),
-				   round_len(strtoull(argv[3], NULL, 0)));
+				   round_len(strtoull(argv[3], NULL, 0)),
+				   argc == 5 && !strcmp(argv[4], "full-private"));
 	}
 	if (argc >= 2 && !strcmp(argv[1], "resume")) {
 		const char *policy;
