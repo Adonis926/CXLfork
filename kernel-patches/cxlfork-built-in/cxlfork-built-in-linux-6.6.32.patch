@@ -1,7 +1,7 @@
 From a54d98a21d50fbd4c3a2f8df4f86eea79d4966f0 Mon Sep 17 00:00:00 2001
 From: Xiong Tianlei <qmyyxtl@sjtu.edu.cn>
 Date: Mon, 18 May 2026 02:40:22 +0000
-Subject: [PATCH 01/32] Add CXLfork shared memory checkpoint prototype
+Subject: [PATCH 01/33] Add CXLfork shared memory checkpoint prototype
 
 ---
  drivers/Kconfig                |   1 +
@@ -1028,7 +1028,7 @@ index 000000000..1e9888abd
 From 2636ddfaf44550a4d1cf21d91f2c68adf3fa6880 Mon Sep 17 00:00:00 2001
 From: Xiong Tianlei <qmyyxtl@sjtu.edu.cn>
 Date: Mon, 18 May 2026 08:23:05 +0000
-Subject: [PATCH 02/32] Add private COW restore path for CXLfork
+Subject: [PATCH 02/33] Add private COW restore path for CXLfork
 
 ---
  drivers/cxlfork/cxlfork_main.c | 227 ++++++++++++++++++++++++++++++++-
@@ -1428,7 +1428,7 @@ index 1e9888abd..3102cf014 100644
 From 42c26326a525082710e2c7a7a36265e537a61dae Mon Sep 17 00:00:00 2001
 From: Xiong Tianlei <qmyyxtl@sjtu.edu.cn>
 Date: Mon, 18 May 2026 08:46:53 +0000
-Subject: [PATCH 03/32] Add direct shared CXL mapping probe
+Subject: [PATCH 03/33] Add direct shared CXL mapping probe
 
 ---
  samples/cxlfork/cxlfork_demo.c | 66 +++++++++++++++++++++++++++++++++-
@@ -1532,7 +1532,7 @@ index 56d76f152..e85ec6331 100644
 From 10f20d238a842b613e4e909afa7d1f2870cf27a7 Mon Sep 17 00:00:00 2001
 From: Xiong Tianlei <qmyyxtl@sjtu.edu.cn>
 Date: Mon, 18 May 2026 08:54:15 +0000
-Subject: [PATCH 04/32] Add shared CXL read with private write COW
+Subject: [PATCH 04/33] Add shared CXL read with private write COW
 
 ---
  drivers/cxlfork/cxlfork_main.c | 42 +++++++++++++++++++++++++++++++---
@@ -1744,7 +1744,7 @@ index 3102cf014..31b8964fd 100644
 From c3f9cd64eb5f619fb867cd2cdd01b75eee98fdab Mon Sep 17 00:00:00 2001
 From: Xiong Tianlei <qmyyxtl@sjtu.edu.cn>
 Date: Mon, 18 May 2026 09:00:51 +0000
-Subject: [PATCH 05/32] Add multi-region CXLfork shared COW test
+Subject: [PATCH 05/33] Add multi-region CXLfork shared COW test
 
 ---
  drivers/cxlfork/cxlfork_main.c |   2 +-
@@ -1988,7 +1988,7 @@ index d251582d1..5f5b52355 100644
 From 4f7725b32fbadc790690524e88c397caceae1da6 Mon Sep 17 00:00:00 2001
 From: Xiong Tianlei <qmyyxtl@sjtu.edu.cn>
 Date: Tue, 19 May 2026 05:35:35 +0000
-Subject: [PATCH 06/32] Add CXLfork fork prepare and child resume API demo
+Subject: [PATCH 06/33] Add CXLfork fork prepare and child resume API demo
 
 ---
  drivers/cxlfork/cxlfork_main.c      |   2 +
@@ -2307,7 +2307,7 @@ index 31b8964fd..950db9674 100644
 From aaade3fc45b929e566e277b6ea696faaa1b0b753 Mon Sep 17 00:00:00 2001
 From: Xiong Tianlei <qmyyxtl@sjtu.edu.cn>
 Date: Tue, 19 May 2026 05:35:58 +0000
-Subject: [PATCH 07/32] Ignore CXLfork sample binaries
+Subject: [PATCH 07/33] Ignore CXLfork sample binaries
 
 ---
  samples/cxlfork/.gitignore | 1 +
@@ -2327,7 +2327,7 @@ index f9e439c0a..434ac8521 100644
 From eac715bec286393ff66911ebcb63629d8005bfee Mon Sep 17 00:00:00 2001
 From: Xiong Tianlei <qmyyxtl@sjtu.edu.cn>
 Date: Tue, 19 May 2026 05:38:32 +0000
-Subject: [PATCH 08/32] Add restored user context CXLfork demo
+Subject: [PATCH 08/33] Add restored user context CXLfork demo
 
 ---
  samples/cxlfork/.gitignore             |   1 +
@@ -2618,7 +2618,7 @@ index 000000000..a04a9bc2a
 From a8d09650b1abea0826d1e84422a4a47ce4e6c597 Mon Sep 17 00:00:00 2001
 From: Xiong Tianlei <qmyyxtl@sjtu.edu.cn>
 Date: Tue, 19 May 2026 06:41:01 +0000
-Subject: [PATCH 09/32] Serialize CXLfork process mm state
+Subject: [PATCH 09/33] Serialize CXLfork process mm state
 
 ---
  drivers/cxlfork/cxlfork.h           |  1 +
@@ -2867,7 +2867,7 @@ index 950db9674..f9e35e529 100644
 From e5942c336bf60b41adeb2d3cfd40df9fd23b3963 Mon Sep 17 00:00:00 2001
 From: Xiong Tianlei <qmyyxtl@sjtu.edu.cn>
 Date: Tue, 19 May 2026 06:51:02 +0000
-Subject: [PATCH 10/32] Serialize CXLfork fd table state
+Subject: [PATCH 10/33] Serialize CXLfork fd table state
 
 ---
  drivers/cxlfork/cxlfork.h           |  2 +
@@ -3172,7 +3172,7 @@ index f9e35e529..1febfeb51 100644
 From 3b862a13fd7cf7071fc9f48420299e5b3159e62c Mon Sep 17 00:00:00 2001
 From: Xiong Tianlei <qmyyxtl@sjtu.edu.cn>
 Date: Tue, 19 May 2026 07:11:11 +0000
-Subject: [PATCH 11/32] Apply serialized CXLfork mm state on resume
+Subject: [PATCH 11/33] Apply serialized CXLfork mm state on resume
 
 ---
  drivers/cxlfork/cxlfork_main.c      | 35 +++++++++++++++++
@@ -3419,7 +3419,7 @@ index 1febfeb51..caaa9caea 100644
 From 1a760e3db0689ecd0e6ca3afaea908aa3d15f2f7 Mon Sep 17 00:00:00 2001
 From: Xiong Tianlei <qmyyxtl@sjtu.edu.cn>
 Date: Tue, 19 May 2026 08:56:26 +0000
-Subject: [PATCH 12/32] Reopen path-backed CXLfork fd state
+Subject: [PATCH 12/33] Reopen path-backed CXLfork fd state
 
 ---
  drivers/cxlfork/cxlfork_main.c      | 38 +++++++++++++++++++++++++++++
@@ -3654,7 +3654,7 @@ index caaa9caea..79c9b94fa 100644
 From a81266f90914783150b7d2328e2d06d361603ba5 Mon Sep 17 00:00:00 2001
 From: Xiong Tianlei <qmyyxtl@sjtu.edu.cn>
 Date: Tue, 19 May 2026 09:04:28 +0000
-Subject: [PATCH 13/32] Serialize CXLfork thread register state
+Subject: [PATCH 13/33] Serialize CXLfork thread register state
 
 ---
  drivers/cxlfork/cxlfork.h           |  1 +
@@ -3883,7 +3883,7 @@ index 79c9b94fa..189edda81 100644
 From 93e6679c4a3861abaa51c403577ee09febd2bc92 Mon Sep 17 00:00:00 2001
 From: Xiong Tianlei <qmyyxtl@sjtu.edu.cn>
 Date: Tue, 19 May 2026 09:25:36 +0000
-Subject: [PATCH 14/32] Apply CXLfork thread state to syscall return
+Subject: [PATCH 14/33] Apply CXLfork thread state to syscall return
 
 ---
  drivers/cxlfork/cxlfork_main.c      |  28 +++-
@@ -4254,7 +4254,7 @@ index 189edda81..9437321f1 100644
 From 8b20c0217ad86112bc781b89990ada4ff740e861 Mon Sep 17 00:00:00 2001
 From: Xiong Tianlei <qmyyxtl@sjtu.edu.cn>
 Date: Tue, 19 May 2026 10:00:24 +0000
-Subject: [PATCH 15/32] Apply CXLfork fsbase TLS state on resume
+Subject: [PATCH 15/33] Apply CXLfork fsbase TLS state on resume
 
 ---
  drivers/cxlfork/cxlfork_main.c      | 15 +++++
@@ -4540,7 +4540,7 @@ index 9437321f1..7658312fa 100644
 From d7d2960b38358c0467f4196d65bdf6001ce33b40 Mon Sep 17 00:00:00 2001
 From: Xiong Tianlei <qmyyxtl@sjtu.edu.cn>
 Date: Tue, 19 May 2026 10:16:22 +0000
-Subject: [PATCH 16/32] Report CXLfork child invocation latency
+Subject: [PATCH 16/33] Report CXLfork child invocation latency
 
 ---
  samples/cxlfork/cxlfork_fork_demo.c | 17 ++++++++++++++++-
@@ -4647,7 +4647,7 @@ index 23696891f..937897c98 100644
 From 40b17dc462c16300d6cd5854321de48b7d91ecd0 Mon Sep 17 00:00:00 2001
 From: Xiong Tianlei <qmyyxtl@sjtu.edu.cn>
 Date: Wed, 20 May 2026 09:49:33 +0000
-Subject: [PATCH 17/32] Add CXLfork paper workload benchmark
+Subject: [PATCH 17/33] Add CXLfork paper workload benchmark
 
 ---
  samples/cxlfork/.gitignore               |   1 +
@@ -5041,7 +5041,7 @@ index 000000000..16d4591da
 From fe37a2eee73ecff6bf2d29ba42470ad37dbc588b Mon Sep 17 00:00:00 2001
 From: Xiong Tianlei <qmyyxtl@sjtu.edu.cn>
 Date: Thu, 21 May 2026 04:01:53 +0000
-Subject: [PATCH 18/32] Count shared CXL fault events
+Subject: [PATCH 18/33] Count shared CXL fault events
 
 ---
  drivers/cxlfork/cxlfork_main.c | 2 ++
@@ -5067,7 +5067,7 @@ index f1b371cd1..5b5565142 100644
 From e07e710762a23e9b657be28a50006bdf7e5d4ef6 Mon Sep 17 00:00:00 2001
 From: Xiong Tianlei <qmyyxtl@sjtu.edu.cn>
 Date: Thu, 21 May 2026 09:59:19 +0000
-Subject: [PATCH 19/32] cxlfork: preserve COW semantics on shared restores
+Subject: [PATCH 19/33] cxlfork: preserve COW semantics on shared restores
 
 ---
  drivers/cxlfork/cxlfork_main.c | 28 ++++------------------------
@@ -5126,7 +5126,7 @@ index 5b5565142..530d16f7a 100644
 From 9b2ecbf5c634b7cac7d3e6e40a6c53d1a2f08888 Mon Sep 17 00:00:00 2001
 From: Xiong Tianlei <qmyyxtl@sjtu.edu.cn>
 Date: Thu, 21 May 2026 12:18:44 +0000
-Subject: [PATCH 20/32] cxlfork: make shared restore use migrate-on-write
+Subject: [PATCH 20/33] cxlfork: make shared restore use migrate-on-write
 
 ---
  drivers/cxlfork/cxlfork_main.c | 26 ++++++++++++++++++++++++--
@@ -5184,7 +5184,7 @@ index 530d16f7a..1ecef8eb5 100644
 From ce072be2b8a048d1eb2c394e0e1e09e14ca09004 Mon Sep 17 00:00:00 2001
 From: Xiong Tianlei <qmyyxtl@sjtu.edu.cn>
 Date: Thu, 21 May 2026 12:23:15 +0000
-Subject: [PATCH 21/32] cxlfork: preinstall CXL PTEs on shared restore
+Subject: [PATCH 21/33] cxlfork: preinstall CXL PTEs on shared restore
 
 ---
  drivers/cxlfork/cxlfork_main.c | 42 +++++++++++++++++++++++++++++++++-
@@ -5257,7 +5257,7 @@ index 1ecef8eb5..19ac0c50e 100644
 From 92ddc4b989fe53332730b13fbb6c04d5a3ad1c08 Mon Sep 17 00:00:00 2001
 From: Xiong Tianlei <qmyyxtl@sjtu.edu.cn>
 Date: Fri, 22 May 2026 03:04:57 +0000
-Subject: [PATCH 22/32] cxlfork: restore global process state
+Subject: [PATCH 22/33] cxlfork: restore global process state
 
 ---
  drivers/cxlfork/cxlfork.h                |   2 +
@@ -5946,7 +5946,7 @@ index 16d4591da..8a89ae69b 100644
 From c71397d461a0e23a732cb720426ccf4445aa41c8 Mon Sep 17 00:00:00 2001
 From: Xiong Tianlei <qmyyxtl@sjtu.edu.cn>
 Date: Wed, 27 May 2026 07:25:32 +0000
-Subject: [PATCH 23/32] cxlfork: expose namespace restore policy
+Subject: [PATCH 23/33] cxlfork: expose namespace restore policy
 
 ---
  drivers/cxlfork/cxlfork_main.c        | 35 +++++++++++++++++++++++++++
@@ -6185,7 +6185,7 @@ index 8b27cbfa5..1a5c9d484 100644
 From 03348d6c840766098ca438dfdf0e9ba135f7cb78 Mon Sep 17 00:00:00 2001
 From: Xiong Tianlei <qmyyxtl@sjtu.edu.cn>
 Date: Wed, 27 May 2026 07:42:45 +0000
-Subject: [PATCH 24/32] cxlfork: add explicit tiering policies
+Subject: [PATCH 24/33] cxlfork: add explicit tiering policies
 
 ---
  drivers/cxlfork/cxlfork_main.c | 26 +++++++++++++++++++++-----
@@ -6344,7 +6344,7 @@ index 1a5c9d484..f0f75c47f 100644
 From 76bce100af5b53929b23079d02d3814e534257ea Mon Sep 17 00:00:00 2001
 From: Xiong Tianlei <qmyyxtl@sjtu.edu.cn>
 Date: Wed, 27 May 2026 07:52:41 +0000
-Subject: [PATCH 25/32] cxlfork: expose CXL PTE attach cost
+Subject: [PATCH 25/33] cxlfork: expose CXL PTE attach cost
 
 ---
  drivers/cxlfork/cxlfork_main.c | 17 ++++++++++++++---
@@ -6438,7 +6438,7 @@ index f0f75c47f..ac34ab20d 100644
 From 4cbfde760487c7a7b162e417c055d5e8e255e6ce Mon Sep 17 00:00:00 2001
 From: Xiong Tianlei <qmyyxtl@sjtu.edu.cn>
 Date: Wed, 27 May 2026 08:04:07 +0000
-Subject: [PATCH 26/32] cxlfork: checkpoint CXL leaf PTE image
+Subject: [PATCH 26/33] cxlfork: checkpoint CXL leaf PTE image
 
 ---
  drivers/cxlfork/cxlfork.h      | 10 ++++
@@ -6712,7 +6712,7 @@ index ac34ab20d..ba8672cc1 100644
 From b9cff22f6772890b5821c1eb335a625917621aa8 Mon Sep 17 00:00:00 2001
 From: Xiong Tianlei <qmyyxtl@sjtu.edu.cn>
 Date: Wed, 27 May 2026 08:20:29 +0000
-Subject: [PATCH 27/32] cxlfork: checkpoint CXL OS state image
+Subject: [PATCH 27/33] cxlfork: checkpoint CXL OS state image
 
 ---
  drivers/cxlfork/cxlfork.h      | 18 ++++++++
@@ -6959,7 +6959,7 @@ index ba8672cc1..f7a634e1a 100644
 From 8613a6a4b191e1f23c1ed7965fee9ecb8f03be83 Mon Sep 17 00:00:00 2001
 From: Xiong Tianlei <qmyyxtl@sjtu.edu.cn>
 Date: Wed, 27 May 2026 08:49:49 +0000
-Subject: [PATCH 28/32] cxlfork: add private rebase and global attach phases
+Subject: [PATCH 28/33] cxlfork: add private rebase and global attach phases
 
 ---
  drivers/cxlfork/cxlfork.h      |  30 ++++++++
@@ -7277,7 +7277,7 @@ index f7a634e1a..cd999e13f 100644
 From e466d81902ec678e8b5d94850a7df3b60c520e46 Mon Sep 17 00:00:00 2001
 From: Xiong Tianlei <qmyyxtl@sjtu.edu.cn>
 Date: Wed, 27 May 2026 09:03:08 +0000
-Subject: [PATCH 29/32] cxlfork: checkpoint full private task state
+Subject: [PATCH 29/33] cxlfork: checkpoint full private task state
 
 ---
  drivers/cxlfork/cxlfork.h      |  2 +
@@ -7615,7 +7615,7 @@ index cd999e13f..6afd64572 100644
 From 550b86f68c41ee64ea5cd56b988cae820cdfaad2 Mon Sep 17 00:00:00 2001
 From: Xiong Tianlei <qmyyxtl@sjtu.edu.cn>
 Date: Wed, 27 May 2026 09:17:02 +0000
-Subject: [PATCH 30/32] cxlfork: checkpoint CXL page table pages
+Subject: [PATCH 30/33] cxlfork: checkpoint CXL page table pages
 
 ---
  drivers/cxlfork/cxlfork.h      |  14 ++++
@@ -7905,7 +7905,7 @@ index 6afd64572..fbad25735 100644
 From 7f38fff64bd8fa8a72784af374cf32e90780db8e Mon Sep 17 00:00:00 2001
 From: Xiong Tianlei <qmyyxtl@sjtu.edu.cn>
 Date: Wed, 27 May 2026 09:29:07 +0000
-Subject: [PATCH 31/32] cxlfork: install mappings from CXL PTE page image
+Subject: [PATCH 31/33] cxlfork: install mappings from CXL PTE page image
 
 ---
  drivers/cxlfork/cxlfork.h      |   2 +
@@ -8140,7 +8140,7 @@ index fbad25735..8f359ed60 100644
 From 5ac30f5a7f5ef2c29e2f8f7cf5763ab38bbfa464 Mon Sep 17 00:00:00 2001
 From: Xiong Tianlei <qmyyxtl@sjtu.edu.cn>
 Date: Wed, 27 May 2026 12:52:25 +0000
-Subject: [PATCH 32/32] cxlfork: account private file-backed checkpoint pages
+Subject: [PATCH 32/33] cxlfork: account private file-backed checkpoint pages
 
 ---
  drivers/cxlfork/cxlfork.h      |  9 +++++++
@@ -8405,6 +8405,172 @@ index 8f359ed60..71cebd8da 100644
  	uint64_t faults;
  };
  
+-- 
+2.43.0
+
+
+From 1e0cfc112fa009643737138e7d827776b335b1f7 Mon Sep 17 00:00:00 2001
+From: Xiong Tianlei <qmyyxtl@sjtu.edu.cn>
+Date: Thu, 28 May 2026 10:06:54 +0000
+Subject: [PATCH 33/33] cxlfork: preserve original PTE accessed dirty bits
+
+---
+ drivers/cxlfork/cxlfork.h      |  5 ++-
+ drivers/cxlfork/cxlfork_main.c | 75 ++++++++++++++++++++++++++++++----
+ 2 files changed, 70 insertions(+), 10 deletions(-)
+
+diff --git a/drivers/cxlfork/cxlfork.h b/drivers/cxlfork/cxlfork.h
+index f7999a138..8440a1f11 100644
+--- a/drivers/cxlfork/cxlfork.h
++++ b/drivers/cxlfork/cxlfork.h
+@@ -38,12 +38,15 @@ struct cxlfork_region_desc {
+ struct cxlfork_pte_desc {
+ 	u64 va;
+ 	u64 cxl_offset;
++	u64 orig_pteval;
++	u64 cxl_pteval;
+ };
+ 
+ struct cxlfork_leaf_pte_image {
+ 	u64 va;
+ 	u64 cxl_offset;
+-	u64 pteval;
++	u64 orig_pteval;
++	u64 cxl_pteval;
+ };
+ 
+ struct cxlfork_pt_page_image {
+diff --git a/drivers/cxlfork/cxlfork_main.c b/drivers/cxlfork/cxlfork_main.c
+index 6a83e81ce..09c2476b9 100644
+--- a/drivers/cxlfork/cxlfork_main.c
++++ b/drivers/cxlfork/cxlfork_main.c
+@@ -32,6 +32,7 @@
+ #include <linux/user_namespace.h>
+ #include <linux/vmalloc.h>
+ #include <asm/fsgsbase.h>
++#include <asm/pgtable.h>
+ #include <asm/ptrace.h>
+ #include <net/net_namespace.h>
+ 
+@@ -163,11 +164,55 @@ static void cxlfork_capture_task_state(struct cxlfork_task_state *st,
+ 	rcu_read_unlock();
+ }
+ 
+-static u64 cxlfork_make_pteval(u64 cxl_offset, u64 prot, bool readonly)
++static u64 cxlfork_make_cxl_pteval(u64 orig_pteval, u64 cxl_offset)
+ {
+ 	unsigned long pfn = (cxl_phys + cxl_offset) >> PAGE_SHIFT;
++	pte_t orig = __pte(orig_pteval);
++	pte_t cxl = pfn_pte(pfn, __pgprot(pte_flags(orig)));
+ 
+-	return pte_val(pfn_pte(pfn, prot_from_uapi(prot, readonly)));
++	/* CXLfork redirects the leaf PTE to the CXL replica and makes it immutable.
++	 * Accessed/Dirty and the remaining protection bits are inherited from the
++	 * checkpointed process page table.
++	 */
++	cxl = pte_wrprotect(cxl);
++	return pte_val(cxl);
++}
++
++static int cxlfork_read_orig_pteval(struct mm_struct *mm, unsigned long addr,
++				    u64 *pteval)
++{
++	pgd_t *pgd;
++	p4d_t *p4d;
++	pud_t *pud;
++	pmd_t *pmd;
++	pte_t *ptep;
++	spinlock_t *ptl;
++
++	pgd = pgd_offset(mm, addr);
++	if (pgd_none(*pgd) || pgd_bad(*pgd))
++		return -EFAULT;
++	p4d = p4d_offset(pgd, addr);
++	if (p4d_none(*p4d) || p4d_bad(*p4d))
++		return -EFAULT;
++	pud = pud_offset(p4d, addr);
++	if (pud_none(*pud) || pud_bad(*pud))
++		return -EFAULT;
++	pmd = pmd_offset(pud, addr);
++	if (pmd_none(*pmd) || pmd_bad(*pmd))
++		return -EFAULT;
++	if (pmd_trans_huge(*pmd) || pmd_devmap(*pmd))
++		return -EOPNOTSUPP;
++
++	ptep = pte_offset_map_lock(mm, pmd, addr, &ptl);
++	if (!ptep)
++		return -EFAULT;
++	if (!pte_present(*ptep)) {
++		pte_unmap_unlock(ptep, ptl);
++		return -EFAULT;
++	}
++	*pteval = pte_val(*ptep);
++	pte_unmap_unlock(ptep, ptl);
++	return 0;
+ }
+ 
+ static void cxlfork_capture_mm_state(struct cxlfork_mm_state *st,
+@@ -643,8 +688,8 @@ static int cxlfork_build_leaf_pte_image(struct cxlfork_desc *desc, u64 *data_off
+ 
+ 		image[i].va = pte->va;
+ 		image[i].cxl_offset = pte->cxl_offset;
+-		image[i].pteval = cxlfork_make_pteval(pte->cxl_offset,
+-						       PROT_READ, true);
++		image[i].orig_pteval = pte->orig_pteval;
++		image[i].cxl_pteval = pte->cxl_pteval;
+ 	}
+ 
+ 	desc->pte_image_offset = *data_off;
+@@ -802,8 +847,7 @@ static int cxlfork_build_pt_page_image(struct cxlfork_desc *desc, u64 *data_off)
+ 			const struct cxlfork_pte_desc *pte = &desc->ptes[i];
+ 			u64 slot = (pte->va - va_base) >> PAGE_SHIFT;
+ 
+-			ptes[slot] = cxlfork_make_pteval(pte->cxl_offset,
+-						       PROT_READ, true);
++			ptes[slot] = pte->cxl_pteval;
+ 			i++;
+ 			meta[nr_pages].nr_ptes++;
+ 		} while (i < desc->nr_ptes &&
+@@ -842,7 +886,7 @@ static int cxlfork_validate_pt_page_image(const struct cxlfork_desc *desc,
+ 
+ 			if ((pte->va & PMD_MASK) != img->va_base || slot >= PTRS_PER_PTE)
+ 				return -EINVAL;
+-			expected = cxlfork_make_pteval(pte->cxl_offset, PROT_READ, true);
++			expected = pte->cxl_pteval;
+ 			if (ptes[slot] != expected)
+ 				return -EINVAL;
+ 		}
+@@ -1050,6 +1094,11 @@ static int cxlfork_ioctl_checkpoint(struct cxlfork_checkpoint __user *uarg)
+ 			pte = &desc->ptes[desc->nr_ptes++];
+ 			pte->va = addr;
+ 			pte->cxl_offset = data_off;
++			ret = cxlfork_read_orig_pteval(mm, addr, &pte->orig_pteval);
++			if (ret)
++				break;
++			pte->cxl_pteval = cxlfork_make_cxl_pteval(pte->orig_pteval,
++								 pte->cxl_offset);
+ 			data_off += PAGE_SIZE;
+ 			r->pages++;
+ 			desc->total_pages++;
+@@ -1272,8 +1321,16 @@ static int cxlfork_prefault_shared_cxl(struct vm_area_struct *vma,
+ 		if (pte->va != r->start + i * PAGE_SIZE || !cxl_ptr(pte->cxl_offset))
+ 			return -EINVAL;
+ 		if (img->va != pte->va || img->cxl_offset != pte->cxl_offset ||
+-		    img->pteval != cxlfork_make_pteval(pte->cxl_offset,
+-						       PROT_READ, true))
++		    img->orig_pteval != pte->orig_pteval ||
++		    img->cxl_pteval != pte->cxl_pteval)
++			return -EINVAL;
++		if (pte_write(__pte(pte->cxl_pteval)))
++			return -EINVAL;
++		if (pte_young(__pte(pte->orig_pteval)) !=
++		    pte_young(__pte(pte->cxl_pteval)))
++			return -EINVAL;
++		if (pte_dirty(__pte(pte->orig_pteval)) !=
++		    pte_dirty(__pte(pte->cxl_pteval)))
+ 			return -EINVAL;
+ 		ret = cxlfork_find_pt_page_pfn(desc, pte->va, &pfn);
+ 		if (ret || pfn != ((cxl_phys + pte->cxl_offset) >> PAGE_SHIFT))
 -- 
 2.43.0
 
