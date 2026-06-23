@@ -67,10 +67,10 @@ index 000000000..16c6c5fd3
 +cxlfork-y := cxlfork_main.o
 diff --git a/drivers/cxlfork/cxlfork.h b/drivers/cxlfork/cxlfork.h
 new file mode 100644
-index 000000000..ef2d29ae2
+index 000000000..2a78ebe53
 --- /dev/null
 +++ b/drivers/cxlfork/cxlfork.h
-@@ -0,0 +1,176 @@
+@@ -0,0 +1,213 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +#ifndef _CXLFORK_INTERNAL_H
 +#define _CXLFORK_INTERNAL_H
@@ -86,9 +86,10 @@ index 000000000..ef2d29ae2
 +#define CXLFORK_SLOT_BYTES SZ_128M
 +#define CXLFORK_MAX_REGIONS 64
 +#define CXLFORK_MAX_PTES 32768
-+#define CXLFORK_MAX_PRIVATE_PTRS 11
++#define CXLFORK_MAX_PRIVATE_PTRS 12
 +#define CXLFORK_MAX_PT_PAGE_IMAGES 1024
 +#define CXLFORK_PT_TREE_MAGIC 0x43584c5054545245ULL /* "CXLPTTRE" */
++#define CXLFORK_VMA_TREE_MAGIC 0x43584c564d415452ULL /* "CXLVMATR" */
 +
 +#define CXLFORK_PTR_STATE_IMAGE 1
 +#define CXLFORK_PTR_LEAF_PTE_IMAGE 2
@@ -98,6 +99,7 @@ index 000000000..ef2d29ae2
 +#define CXLFORK_PTR_PT_PAGE_IMAGE 6
 +#define CXLFORK_PTR_PT_TREE_IMAGE 7
 +#define CXLFORK_PTR_REBASE_IMAGE 8
++#define CXLFORK_PTR_VMA_TREE_IMAGE 9
 +
 +struct cxlfork_region_desc {
 +	u64 start;
@@ -132,6 +134,33 @@ index 000000000..ef2d29ae2
 +	u64 pte_page_offset;
 +};
 +
++
++struct cxlfork_vma_node_image {
++	u64 start;
++	u64 end;
++	u64 prot;
++	u64 flags;
++	u64 pgoff_first;
++	u64 pages;
++	u64 anon_pages;
++	u64 clean_file_pages;
++	u64 dirty_file_pages;
++	u64 region_index;
++	u64 left_offset;
++	u64 right_offset;
++	u64 parent_offset;
++};
++
++struct cxlfork_vma_tree_image {
++	u64 magic;
++	u64 version;
++	u64 key;
++	u64 root_offset;
++	u64 nodes_offset;
++	u64 nr_nodes;
++	u64 region_table_offset;
++};
++
 +struct cxlfork_pt_tree_image {
 +	u64 magic;
 +	u64 version;
@@ -162,6 +191,8 @@ index 000000000..ef2d29ae2
 +	u64 global_state_offset;
 +	u64 fd_table_offset;
 +	u64 region_table_offset;
++	u64 vma_tree_image_offset;
++	u64 vma_tree_root_offset;
 +	u64 pte_table_offset;
 +	u64 leaf_pte_image_offset;
 +	u64 pt_page_image_offset;
@@ -235,6 +266,12 @@ index 000000000..ef2d29ae2
 +	u64 private_rebase_pages;
 +	u64 private_rebase_ns;
 +	u64 private_rebase_validate_ns;
++	u64 vma_tree_image_offset;
++	u64 vma_tree_root_offset;
++	u64 vma_tree_nodes;
++	u64 vma_tree_pages;
++	u64 vma_tree_build_ns;
++	u64 vma_tree_validate_ns;
 +	u64 global_detach_ns;
 +	u64 global_attach_ns;
 +	struct cxlfork_task_state task_state;
@@ -249,10 +286,10 @@ index 000000000..ef2d29ae2
 +#endif /* _CXLFORK_INTERNAL_H */
 diff --git a/drivers/cxlfork/cxlfork_main.c b/drivers/cxlfork/cxlfork_main.c
 new file mode 100644
-index 000000000..bf14b99a3
+index 000000000..b6bb86259
 --- /dev/null
 +++ b/drivers/cxlfork/cxlfork_main.c
-@@ -0,0 +1,2124 @@
+@@ -0,0 +1,2311 @@
 +// SPDX-License-Identifier: GPL-2.0
 +#include <linux/cdev.h>
 +#include <linux/cgroup.h>
@@ -830,6 +867,9 @@ index 000000000..bf14b99a3
 +	op->pt_page_image_build_ns = desc->pt_page_image_build_ns;
 +	op->pt_page_image_pages = desc->pt_page_image_pages;
 +	op->pt_page_image_entries = desc->pt_page_image_entries;
++	op->vma_tree_build_ns = desc->vma_tree_build_ns;
++	op->vma_tree_pages = desc->vma_tree_pages;
++	op->vma_tree_nodes = desc->vma_tree_nodes;
 +	op->state_image_build_ns = desc->state_image_build_ns;
 +	op->state_image_pages = desc->state_image_pages;
 +	op->private_rebase_ns = desc->private_rebase_ns;
@@ -852,6 +892,9 @@ index 000000000..bf14b99a3
 +	op->pt_page_image_build_ns = desc->pt_page_image_build_ns;
 +	op->pt_page_image_pages = desc->pt_page_image_pages;
 +	op->pt_page_image_entries = desc->pt_page_image_entries;
++	op->vma_tree_build_ns = desc->vma_tree_build_ns;
++	op->vma_tree_pages = desc->vma_tree_pages;
++	op->vma_tree_nodes = desc->vma_tree_nodes;
 +	op->state_image_build_ns = desc->state_image_build_ns;
 +	op->state_image_pages = desc->state_image_pages;
 +	op->private_rebase_ns = desc->private_rebase_ns;
@@ -1083,6 +1126,166 @@ index 000000000..bf14b99a3
 +	return 0;
 +}
 +
++
++static u64 cxlfork_vma_node_offset(u64 nodes_offset, u64 index)
++{
++	return nodes_offset + index * sizeof(struct cxlfork_vma_node_image);
++}
++
++static void cxlfork_vma_tree_link(struct cxlfork_vma_node_image *nodes,
++					  u64 nodes_offset, long lo, long hi,
++					  long parent, u64 *root_offset)
++{
++	long mid;
++	struct cxlfork_vma_node_image *node;
++
++	if (lo > hi)
++		return;
++	mid = lo + (hi - lo) / 2;
++	node = &nodes[mid];
++	if (parent >= 0) {
++		struct cxlfork_vma_node_image *parent_node = &nodes[parent];
++		u64 off = cxlfork_vma_node_offset(nodes_offset, mid);
++
++		node->parent_offset = cxlfork_vma_node_offset(nodes_offset, parent);
++		if (mid < parent)
++			parent_node->left_offset = off;
++		else
++			parent_node->right_offset = off;
++	} else {
++		*root_offset = cxlfork_vma_node_offset(nodes_offset, mid);
++	}
++	cxlfork_vma_tree_link(nodes, nodes_offset, lo, mid - 1, mid, root_offset);
++	cxlfork_vma_tree_link(nodes, nodes_offset, mid + 1, hi, mid, root_offset);
++}
++
++static int cxlfork_build_vma_tree_image(struct cxlfork_desc *desc, u64 *data_off)
++{
++	struct cxlfork_vma_tree_image *tree;
++	struct cxlfork_vma_node_image *nodes;
++	u64 tree_offset;
++	u64 nodes_offset;
++	u64 bytes;
++	u64 i;
++
++	if (!desc->nr_regions)
++		return 0;
++	bytes = PAGE_ALIGN(sizeof(*tree)) +
++		PAGE_ALIGN(desc->nr_regions * sizeof(*nodes));
++	if (*data_off + bytes > slot_offset(desc->slot) + CXLFORK_SLOT_BYTES)
++		return -ENOSPC;
++	tree_offset = *data_off;
++	tree = cxl_ptr(tree_offset);
++	if (!tree)
++		return -ENOSPC;
++	memset(tree, 0, bytes);
++	nodes_offset = tree_offset + PAGE_ALIGN(sizeof(*tree));
++	nodes = cxl_ptr(nodes_offset);
++	if (!nodes)
++		return -ENOSPC;
++
++	for (i = 0; i < desc->nr_regions; i++) {
++		const struct cxlfork_region_desc *r = &desc->regions[i];
++		struct cxlfork_vma_node_image *node = &nodes[i];
++
++		node->start = r->start;
++		node->end = r->start + r->length;
++		node->prot = r->prot;
++		node->flags = r->flags;
++		node->pgoff_first = r->pgoff_first;
++		node->pages = r->pages;
++		node->anon_pages = r->anon_pages;
++		node->clean_file_pages = r->clean_file_pages;
++		node->dirty_file_pages = r->dirty_file_pages;
++		node->region_index = i;
++	}
++
++	tree->magic = CXLFORK_VMA_TREE_MAGIC;
++	tree->version = CXLFORK_DESC_VERSION;
++	tree->key = desc->key;
++	tree->nodes_offset = nodes_offset;
++	tree->nr_nodes = desc->nr_regions;
++	tree->region_table_offset = slot_offset(desc->slot) + offsetof(struct cxlfork_desc, regions);
++	cxlfork_vma_tree_link(nodes, nodes_offset, 0, desc->nr_regions - 1, -1,
++				&tree->root_offset);
++
++	desc->vma_tree_image_offset = tree_offset;
++	desc->vma_tree_root_offset = tree->root_offset;
++	desc->vma_tree_nodes = desc->nr_regions;
++	desc->vma_tree_pages = bytes >> PAGE_SHIFT;
++	*data_off += bytes;
++	return 0;
++}
++
++static int cxlfork_validate_vma_tree_node(const struct cxlfork_desc *desc,
++					  const struct cxlfork_vma_tree_image *tree,
++					  u64 node_offset, u64 min_start,
++					  u64 max_start, u64 parent_offset,
++					  u64 *visited)
++{
++	const struct cxlfork_vma_node_image *node;
++	const struct cxlfork_region_desc *r;
++
++	if (!node_offset)
++		return 0;
++	if (!cxl_range_valid(node_offset, sizeof(*node)))
++		return -EINVAL;
++	node = cxl_ptr(node_offset);
++	if (!node || node->region_index >= desc->nr_regions ||
++	    node->parent_offset != parent_offset)
++		return -EINVAL;
++	if (node->start < min_start || node->start >= max_start)
++		return -EINVAL;
++	r = &desc->regions[node->region_index];
++	if (node->start != r->start || node->end != r->start + r->length ||
++	    node->prot != r->prot || node->flags != r->flags ||
++	    node->pgoff_first != r->pgoff_first || node->pages != r->pages ||
++	    node->anon_pages != r->anon_pages ||
++	    node->clean_file_pages != r->clean_file_pages ||
++	    node->dirty_file_pages != r->dirty_file_pages)
++		return -EINVAL;
++	(*visited)++;
++	if (node->left_offset && cxlfork_validate_vma_tree_node(desc, tree,
++			node->left_offset, min_start, node->start, node_offset, visited))
++		return -EINVAL;
++	if (node->right_offset && cxlfork_validate_vma_tree_node(desc, tree,
++			node->right_offset, node->start + 1, max_start, node_offset, visited))
++		return -EINVAL;
++	return 0;
++}
++
++static int cxlfork_validate_vma_tree_image(const struct cxlfork_desc *desc,
++					   u64 *validate_ns)
++{
++	const struct cxlfork_vma_tree_image *tree;
++	u64 start_ns = ktime_get_ns();
++	u64 visited = 0;
++	int ret;
++
++	if (!desc->vma_tree_image_offset || !desc->vma_tree_root_offset ||
++	    !desc->vma_tree_nodes || !desc->vma_tree_pages ||
++	    !cxl_range_valid(desc->vma_tree_image_offset,
++			     desc->vma_tree_pages * PAGE_SIZE))
++		return -EINVAL;
++	tree = cxl_ptr(desc->vma_tree_image_offset);
++	if (!tree)
++		return -EINVAL;
++	if (tree->magic != CXLFORK_VMA_TREE_MAGIC ||
++	    tree->version != CXLFORK_DESC_VERSION || tree->key != desc->key ||
++	    tree->root_offset != desc->vma_tree_root_offset ||
++	    tree->nodes_offset != desc->vma_tree_image_offset + PAGE_ALIGN(sizeof(*tree)) ||
++	    tree->nr_nodes != desc->nr_regions ||
++	    tree->region_table_offset != slot_offset(desc->slot) + offsetof(struct cxlfork_desc, regions))
++		return -EINVAL;
++	ret = cxlfork_validate_vma_tree_node(desc, tree, tree->root_offset, 0,
++					       TASK_SIZE, 0, &visited);
++	if (ret || visited != desc->nr_regions)
++		return -EINVAL;
++	if (validate_ns)
++		*validate_ns += ktime_get_ns() - start_ns;
++	return 0;
++}
++
 +static int cxlfork_build_state_image(struct cxlfork_desc *desc, u64 *data_off)
 +{
 +	struct cxlfork_state_image *image;
@@ -1116,6 +1319,8 @@ index 000000000..bf14b99a3
 +	image->global_state_offset = image_off + offsetof(struct cxlfork_state_image, global_state);
 +	image->fd_table_offset = image_off + offsetof(struct cxlfork_state_image, fds);
 +	image->region_table_offset = image_off + offsetof(struct cxlfork_state_image, regions);
++	image->vma_tree_image_offset = desc->vma_tree_image_offset;
++	image->vma_tree_root_offset = desc->vma_tree_root_offset;
 +	image->pte_table_offset = slot_offset(desc->slot) + offsetof(struct cxlfork_desc, ptes);
 +	image->leaf_pte_image_offset = desc->pte_image_offset;
 +	image->pt_page_image_offset = desc->pt_page_image_offset;
@@ -1179,6 +1384,8 @@ index 000000000..bf14b99a3
 +	    image->global_state_offset != desc->state_image_offset + offsetof(struct cxlfork_state_image, global_state) ||
 +	    image->fd_table_offset != desc->state_image_offset + offsetof(struct cxlfork_state_image, fds) ||
 +	    image->region_table_offset != desc->state_image_offset + offsetof(struct cxlfork_state_image, regions) ||
++	    image->vma_tree_image_offset != desc->vma_tree_image_offset ||
++	    image->vma_tree_root_offset != desc->vma_tree_root_offset ||
 +	    image->pte_table_offset != slot_offset(desc->slot) + offsetof(struct cxlfork_desc, ptes) ||
 +	    image->leaf_pte_image_offset != desc->pte_image_offset ||
 +	    image->pt_page_image_offset != desc->pt_page_image_offset ||
@@ -1193,6 +1400,8 @@ index 000000000..bf14b99a3
 +	    !cxl_range_valid(image->global_state_offset, sizeof(image->global_state)) ||
 +	    !cxl_range_valid(image->fd_table_offset, sizeof(image->fds)) ||
 +	    !cxl_range_valid(image->region_table_offset, sizeof(image->regions)) ||
++	    !cxl_range_valid(image->vma_tree_image_offset, desc->vma_tree_pages * PAGE_SIZE) ||
++	    !cxl_range_valid(image->vma_tree_root_offset, sizeof(struct cxlfork_vma_node_image)) ||
 +	    !cxl_range_valid(image->pte_table_offset, desc->nr_ptes * sizeof(desc->ptes[0])) ||
 +	    !cxl_range_valid(image->leaf_pte_image_offset, desc->pte_image_pages * PAGE_SIZE) ||
 +	    !cxl_range_valid(image->pt_page_image_offset, desc->pt_page_image_pages * PAGE_SIZE) ||
@@ -1442,6 +1651,10 @@ index 000000000..bf14b99a3
 +				desc->pt_tree_image_offset,
 +				(desc->pt_tree_pages + 1) * PAGE_SIZE,
 +				desc->pt_tree_entries);
++	cxlfork_private_ptr_set(image, &idx, CXLFORK_PTR_VMA_TREE_IMAGE,
++				desc->vma_tree_image_offset,
++				desc->vma_tree_pages * PAGE_SIZE,
++				desc->vma_tree_nodes);
 +	cxlfork_private_ptr_set(image, &idx, CXLFORK_PTR_REBASE_IMAGE,
 +				*data_off, image_bytes, 1);
 +	image->nr_ptrs = idx;
@@ -1629,6 +1842,12 @@ index 000000000..bf14b99a3
 +
 +		ret = cxlfork_build_pt_page_image(desc, &data_off);
 +		desc->pt_page_image_build_ns = ktime_get_ns() - pt_page_start;
++	}
++	if (!ret) {
++		u64 vma_tree_start = ktime_get_ns();
++
++		ret = cxlfork_build_vma_tree_image(desc, &data_off);
++		desc->vma_tree_build_ns = ktime_get_ns() - vma_tree_start;
 +	}
 +	if (!ret) {
 +		u64 state_image_start = ktime_get_ns();
@@ -2108,6 +2327,7 @@ index 000000000..bf14b99a3
 +
 +	start_ns = ktime_get_ns();
 +	desc->pt_page_image_validate_ns = 0;
++	desc->vma_tree_validate_ns = 0;
 +	desc->private_rebase_validate_ns = 0;
 +	desc->direct_pte_install_ns = 0;
 +	desc->direct_pte_install_pages = 0;
@@ -2124,6 +2344,9 @@ index 000000000..bf14b99a3
 +		ret = -EINVAL;
 +		goto out_unlock;
 +	}
++	ret = cxlfork_validate_vma_tree_image(desc, &desc->vma_tree_validate_ns);
++	if (ret)
++		goto out_unlock;
 +	ret = cxlfork_validate_state_image(desc, &state_image_validate_ns);
 +	if (ret)
 +		goto out_unlock;
@@ -2208,6 +2431,7 @@ index 000000000..bf14b99a3
 +		pte_image_validate_ns = state->pte_image_validate_ns;
 +	op->pte_image_validate_ns = pte_image_validate_ns;
 +	op->pt_page_image_validate_ns = desc->pt_page_image_validate_ns;
++	op->vma_tree_validate_ns = desc->vma_tree_validate_ns;
 +	op->state_image_validate_ns = state_image_validate_ns;
 +	op->private_rebase_validate_ns = desc->private_rebase_validate_ns;
 +	cxlfork_capture_namespace_state(&op->restore_ns_state);
@@ -2379,10 +2603,10 @@ index 000000000..bf14b99a3
 +MODULE_DESCRIPTION("CXLfork shared CXL checkpoint/restore prototype");
 diff --git a/include/uapi/linux/cxlfork.h b/include/uapi/linux/cxlfork.h
 new file mode 100644
-index 000000000..562af1a66
+index 000000000..436932e15
 --- /dev/null
 +++ b/include/uapi/linux/cxlfork.h
-@@ -0,0 +1,247 @@
+@@ -0,0 +1,254 @@
 +/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 +#ifndef _UAPI_LINUX_CXLFORK_H
 +#define _UAPI_LINUX_CXLFORK_H
@@ -2547,6 +2771,9 @@ index 000000000..562af1a66
 +	__u64 pt_page_image_build_ns;
 +	__u64 pt_page_image_pages;
 +	__u64 pt_page_image_entries;
++	__u64 vma_tree_build_ns;
++	__u64 vma_tree_pages;
++	__u64 vma_tree_nodes;
 +	__u64 state_image_build_ns;
 +	__u64 state_image_pages;
 +	__u64 private_rebase_ns;
@@ -2586,6 +2813,10 @@ index 000000000..562af1a66
 +	__u64 pt_page_image_build_ns;
 +	__u64 pt_page_image_pages;
 +	__u64 pt_page_image_entries;
++	__u64 vma_tree_validate_ns;
++	__u64 vma_tree_build_ns;
++	__u64 vma_tree_pages;
++	__u64 vma_tree_nodes;
 +	__u64 state_image_validate_ns;
 +	__u64 state_image_build_ns;
 +	__u64 state_image_pages;
@@ -4315,10 +4546,10 @@ index 000000000..937897c98
 +}
 diff --git a/samples/cxlfork/cxlfork_uapi.h b/samples/cxlfork/cxlfork_uapi.h
 new file mode 100644
-index 000000000..71cebd8da
+index 000000000..94719ccd1
 --- /dev/null
 +++ b/samples/cxlfork/cxlfork_uapi.h
-@@ -0,0 +1,247 @@
+@@ -0,0 +1,254 @@
 +/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 +#ifndef _CXLFORK_SAMPLE_UAPI_H
 +#define _CXLFORK_SAMPLE_UAPI_H
@@ -4483,6 +4714,9 @@ index 000000000..71cebd8da
 +	uint64_t pt_page_image_build_ns;
 +	uint64_t pt_page_image_pages;
 +	uint64_t pt_page_image_entries;
++	uint64_t vma_tree_build_ns;
++	uint64_t vma_tree_pages;
++	uint64_t vma_tree_nodes;
 +	uint64_t state_image_build_ns;
 +	uint64_t state_image_pages;
 +	uint64_t private_rebase_ns;
@@ -4522,6 +4756,10 @@ index 000000000..71cebd8da
 +	uint64_t pt_page_image_build_ns;
 +	uint64_t pt_page_image_pages;
 +	uint64_t pt_page_image_entries;
++	uint64_t vma_tree_validate_ns;
++	uint64_t vma_tree_build_ns;
++	uint64_t vma_tree_pages;
++	uint64_t vma_tree_nodes;
 +	uint64_t state_image_validate_ns;
 +	uint64_t state_image_build_ns;
 +	uint64_t state_image_pages;
