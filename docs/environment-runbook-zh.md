@@ -1,10 +1,191 @@
 # 当前环境运行文档
 
-本文说明 104 服务器上当前 CXLfork 复现环境的文件结构、VM 拓扑、启动状态、常用命令和 benchmark 运行方法。
+本文说明如何在一台新机器上 clone 仓库、初始化 submodule、编译内核、准备 VM 镜像、启动 VM，并运行当前 CXLfork / CXLporter / OpenWhisk benchmark。后半部分记录 104 服务器上的当前运行状态。
+
+## 0. 从零 clone 到跑通的最短路径
+
+目标机器需要：
+
+- Linux host，支持 KVM。
+- `git`、`make`、`gcc`/`clang`、`bc`、`bison`、`flex`、`libssl-dev`、`libelf-dev` 等内核编译依赖。
+- `qemu-system-x86_64`、`qemu-img`。
+- `cloud-image-utils`，用于生成 cloud-init seed ISO。
+- 可选：Docker，用于 OpenWhisk standalone benchmark。
+
+Ubuntu host 可先安装：
+
+```bash
+sudo apt-get update
+sudo apt-get install -y \
+  git build-essential bc bison flex libssl-dev libelf-dev dwarves \
+  qemu-system-x86 qemu-utils cloud-image-utils openssh-client \
+  curl ca-certificates python3 make
+```
+
+clone 主仓库：
+
+```bash
+git clone -b remote-fork https://github.com/qmyyxtl/cxlfork-repro.git
+cd cxlfork-repro
+```
+
+初始化 submodule：
+
+```bash
+git submodule update --init --recursive
+```
+
+如果子仓库需要显式切分支：
+
+```bash
+git -C kernel/linux-6.6.32 checkout remote-fork
+git -C cxlporter checkout main
+git -C criu-cxl checkout criu-dev
+```
+
+编译 Linux 6.6.32 CXLfork 内核：
+
+```bash
+mkdir -p kernel/build-6.6.32
+make -C kernel/linux-6.6.32 O="$PWD/kernel/build-6.6.32" olddefconfig
+make -C kernel/linux-6.6.32 O="$PWD/kernel/build-6.6.32" -j"$(nproc)" bzImage
+```
+
+编译 CXLporter：
+
+```bash
+make -C cxlporter clean all
+```
+
+准备 VM 镜像和 cloud-init seed：
+
+```bash
+mkdir -p images cloudinit logs pids sockets
+```
+
+当前仓库不提交 qcow2 镜像，因为镜像文件很大。需要准备三个 Ubuntu 24.04 rootfs：
+
+```text
+images/vm0.qcow2
+images/vm1.qcow2
+images/normal-localfork.qcow2
+```
+
+最简单方式是从 Ubuntu 24.04 cloud image 复制三份：
+
+```bash
+curl -L -o images/base.img \
+  https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+qemu-img convert -f qcow2 -O qcow2 images/base.img images/vm0.qcow2
+qemu-img convert -f qcow2 -O qcow2 images/base.img images/vm1.qcow2
+qemu-img convert -f qcow2 -O qcow2 images/base.img images/normal-localfork.qcow2
+qemu-img resize images/vm0.qcow2 20G
+qemu-img resize images/vm1.qcow2 20G
+qemu-img resize images/normal-localfork.qcow2 20G
+```
+
+生成 cloud-init。下面的配置创建 `ubuntu` 用户，并允许 SSH 免密登录；实际复现时建议替换成自己的 SSH public key：
+
+```bash
+cat > cloudinit/vm0-meta-data <<'EOF'
+instance-id: cxlfork-vm0
+local-hostname: cxlfork-node0
+EOF
+
+cat > cloudinit/vm1-meta-data <<'EOF'
+instance-id: cxlfork-vm1
+local-hostname: cxlfork-node1
+EOF
+
+cat > cloudinit/vm0-user-data <<'EOF'
+#cloud-config
+users:
+  - default
+  - name: ubuntu
+    groups: sudo
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    lock_passwd: false
+    ssh_authorized_keys: []
+chpasswd:
+  expire: false
+  users:
+    - {name: ubuntu, password: ubuntu, type: text}
+ssh_pwauth: true
+EOF
+
+cp cloudinit/vm0-user-data cloudinit/vm1-user-data
+cloud-localds cloudinit/vm0-seed.iso cloudinit/vm0-user-data cloudinit/vm0-meta-data
+cloud-localds cloudinit/vm1-seed.iso cloudinit/vm1-user-data cloudinit/vm1-meta-data
+```
+
+启动 VM：
+
+```bash
+./scripts/start-cxlfork-vms.sh all
+```
+
+启动脚本：
+
+- `scripts/start-cxlfork-vms.sh all`：启动 VM0、VM1、localfork。
+- `scripts/start-cxlfork-vms.sh cxl`：只启动 VM0、VM1。
+- `scripts/start-cxlfork-vms.sh vm0`：只启动 VM0。
+- `scripts/start-cxlfork-vms.sh vm1`：只启动 VM1。
+- `scripts/start-cxlfork-vms.sh localfork`：只启动 local baseline VM。
+
+停止脚本：
+
+```bash
+./scripts/stop-cxlfork-vms.sh all
+```
+
+等待 cloud-init 完成后检查 SSH：
+
+```bash
+ssh -o StrictHostKeyChecking=no -p 2200 ubuntu@localhost 'uname -r; ls -l /dev/cxlfork || true'
+ssh -o StrictHostKeyChecking=no -p 2201 ubuntu@localhost 'uname -r; ls -l /dev/cxlfork || true'
+ssh -o StrictHostKeyChecking=no -p 2202 ubuntu@localhost 'uname -r'
+```
+
+运行 CXLporter serverless benchmark：
+
+```bash
+cd cxlporter
+FUNCTIONS="json:4194304 pyaes:4194304 html:8388608 touch:67108864" \
+POLICIES="mow moa hybrid" \
+POOL_SIZES="1 4" \
+REQUESTS=5 \
+WARMUP=1 \
+./scripts/30-benchmark-cxlporter.sh
+```
+
+运行 unified touch benchmark：
+
+```bash
+cd ..
+SIZES="4194304 67108864" \
+MODES="read write" \
+POLICIES="mow moa hybrid" \
+ITERS=5 \
+WARMUP=1 \
+./scripts/21-benchmark-unified-touch.sh
+```
+
+运行 OpenWhisk standalone benchmark：
+
+```bash
+cd cxlporter/openwhisk
+./scripts/start-standalone.sh
+RUNTIME=nodejs:20 REQUESTS=5 WARMUP=1 ./scripts/40-benchmark-openwhisk.sh
+REQUESTS=5 WARMUP=1 ./scripts/41-benchmark-local-node.sh
+./scripts/stop-standalone.sh
+```
+
+注意：OpenWhisk 路径依赖 Docker，并可能需要配置 Docker daemon 代理才能拉取 `openwhisk/standalone:nightly` 和 runtime images。
 
 ## 1. 登录与工作目录
 
-入口服务器：
+104 服务器入口：
 
 ```bash
 ssh xtl@10.0.16.104
@@ -167,11 +348,25 @@ cd /home/xtl/cxlfork-ws
 less kernel-patches/cxlfork-built-in/cxlfork-built-in-linux-6.6.32.patch
 ```
 
+启动脚本：
+
+```bash
+cd /home/xtl/cxlfork-ws
+./scripts/start-cxlfork-vms.sh all
+```
+
+停止脚本：
+
+```bash
+cd /home/xtl/cxlfork-ws
+./scripts/stop-cxlfork-vms.sh all
+```
+
 注意：
 
 - 当前 VM 已经在跑，不建议无准备地 kill QEMU。
-- 如需重启 VM，先确认 `pids/`、`sockets/` 和 QEMU 启动参数。
-- 当前仓库没有把完整 QEMU 启动脚本纳入 git，运行参数可从 `/proc/<pid>/cmdline` 或 `pids/*.pid` 反查。
+- 如需重启 VM，优先使用 `scripts/stop-cxlfork-vms.sh` 和 `scripts/start-cxlfork-vms.sh`。
+- `images/*.qcow2`、`cloudinit/*.iso`、`logs/`、`pids/`、`sockets/` 是运行环境产物，不适合提交进 git。
 
 查看当前 QEMU 命令：
 
