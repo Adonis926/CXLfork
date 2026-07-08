@@ -79,6 +79,10 @@ CRIU-CXL、Mitosis-CXL 和原始 Mitosis 不属于当前主线，默认不初始
 ```bash
 mkdir -p kernel/build-6.6.32
 make -C kernel/linux-6.6.32 O=/home/xtl/cxlfork/cxlfork-repro/kernel/build-6.6.32 olddefconfig
+kernel/linux-6.6.32/scripts/config --file kernel/build-6.6.32/.config --enable CXLFORK
+kernel/linux-6.6.32/scripts/config --file kernel/build-6.6.32/.config --enable NLS_CODEPAGE_437
+kernel/linux-6.6.32/scripts/config --file kernel/build-6.6.32/.config --enable NLS_ISO8859_1
+make -C kernel/linux-6.6.32 O=/home/xtl/cxlfork/cxlfork-repro/kernel/build-6.6.32 olddefconfig
 make -C kernel/linux-6.6.32 O=/home/xtl/cxlfork/cxlfork-repro/kernel/build-6.6.32 -j"$(nproc)" bzImage
 ```
 
@@ -96,6 +100,8 @@ CONFIG_CXLFORK=y
 ```
 
 如果 `CONFIG_CXLFORK` 未启用，不要继续启动 VM。
+
+如果 localfork 启动后进入 emergency mode 并提示 FAT `IO charset iso8859-1 not found`，说明 `CONFIG_NLS_CODEPAGE_437` 或 `CONFIG_NLS_ISO8859_1` 没有 built-in，需要按上面的 `scripts/config` 命令重新配置并编译。
 
 ## 4. 镜像和 Cloud-init
 
