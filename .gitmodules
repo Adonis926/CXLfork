@@ -5,3 +5,4 @@
 [submodule "cxlporter"]
 	path = cxlporter
 	url = https://github.com/qmyyxtl/cxlfork-cxlporter.git
+	branch = cxlfork-mainline
