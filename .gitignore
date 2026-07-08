@@ -1,0 +1,20 @@
+# VM images and cloud-init state
+/images/
+/cloudinit/
+/logs/
+/pids/
+/sockets/
+
+# Benchmark outputs
+/results/
+/cxlporter/results/
+/cxlporter/openwhisk/results/
+
+# Generated binaries
+/scripts/unified_touch_bench
+/cxlporter/cxlporter
+
+# Local-only archived non-mainline content
+/criu-cxl/
+/mitosis-core/
+/kernel/linux-6.6.32-cxlfork/
