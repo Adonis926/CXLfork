@@ -15,10 +15,17 @@
 
 #include "cxlfork_uapi.h"
 
+/*
+ * unified_touch_bench 是最小闭环 microbenchmark：
+ * - local：在 localfork VM 内执行普通 fork，作为单机 baseline。
+ * - prepare：在 VM0 上把一段匿名内存 checkpoint 到 CXL。
+ * - resume：在 VM1 上按 mow/moa/hybrid 策略恢复并 touch 每页。
+ */
 #define PAGE_SIZE_LOCAL 4096UL
-#define DEFAULT_BASE ((void *)0x776000000000ULL)
+#define DEFAULT_BASE ((void *)0x776000000000ULL) /* 固定 VA，便于跨 VM 恢复到相同地址。 */
 
 struct child_result {
+	/* 子进程通过 pipe 回传的统一结果；字段顺序对应脚本解析的输出项。 */
 	uint64_t child_start_ns;
 	uint64_t restore_ns;
 	uint64_t global_restore_ns;
@@ -57,6 +64,7 @@ struct child_result {
 
 static uint64_t nsec_now(void)
 {
+	/* 所有 benchmark 时间都使用 monotonic ns，避免 wall-clock 调整影响结果。 */
 	struct timespec ts;
 
 	clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -70,11 +78,13 @@ static size_t round_len(size_t len)
 
 static uint64_t pattern(size_t off)
 {
+	/* 可重复的数据填充模式，用 checksum 验证 restore 后内容可读。 */
 	return 0xc584f00d00000000ULL ^ ((uint64_t)off * 0x9e3779b97f4a7c15ULL);
 }
 
 static void map_and_fill(void *base, size_t len)
 {
+	/* prepare/local 阶段创建固定地址匿名映射，并逐 8 字节写入确定性内容。 */
 	uint64_t *p;
 	size_t off;
 
@@ -90,6 +100,7 @@ static void map_and_fill(void *base, size_t len)
 
 static uint64_t touch_pages(void *base, size_t len, int write_pages)
 {
+	/* 每页访问一次；write 模式会触发 COW/tiering 路径，read 模式只读。 */
 	volatile uint64_t *slot;
 	uint64_t acc = 0;
 	size_t off;
@@ -158,6 +169,7 @@ static int parse_write_mode(const char *mode)
 
 static uint64_t tiering_flags(const char *policy)
 {
+	/* 用户可见 policy 名称到内核 restore flag 的映射。 */
 	if (!strcmp(policy, "mow"))
 		return CXLFORK_F_MIGRATE_ON_WRITE;
 	if (!strcmp(policy, "moa"))
@@ -170,6 +182,7 @@ static uint64_t tiering_flags(const char *policy)
 
 static int run_local(size_t len, int iters, int warmup, int write_pages)
 {
+	/* LocalFork baseline：父进程预填充内存，子进程 fork 后直接 touch。 */
 	uint64_t *fork_ns;
 	uint64_t *touch_ns;
 	uint64_t *total_ns;
@@ -249,6 +262,7 @@ static int run_local(size_t len, int iters, int warmup, int write_pages)
 
 static int run_prepare(uint64_t key, size_t len, int full_private)
 {
+	/* VM0 路径：构造 workload 内存后调用 CXLFORK_FORK_PREPARE 写入 CXL slot。 */
 	struct cxlfork_checkpoint op;
 	struct cxlfork_release rel = { .key = key };
 	uint64_t checksum;
@@ -305,6 +319,7 @@ static int run_prepare(uint64_t key, size_t len, int full_private)
 
 static int read_stats(int fd, uint64_t key, uint64_t *faults)
 {
+	/* resume 前后读取 faults 差值，用来观察 policy 是否走 fault handler。 */
 	struct cxlfork_stats st;
 
 	memset(&st, 0, sizeof(st));
@@ -318,6 +333,7 @@ static int read_stats(int fd, uint64_t key, uint64_t *faults)
 static int cxlfork_child(uint64_t key, size_t len, int write_pages,
 			 const char *policy, uint64_t hot_stride, int pipefd)
 {
+	/* VM1 子进程路径：resume 后 touch workload，再把 breakdown 写回父进程。 */
 	struct cxlfork_restore op;
 	struct child_result res;
 	uint64_t before_faults = 0;
@@ -383,6 +399,7 @@ static int cxlfork_child(uint64_t key, size_t len, int write_pages,
 static int run_resume(uint64_t key, size_t len, int iters, int warmup,
 		      int write_pages, const char *policy, uint64_t hot_stride)
 {
+	/* 多轮 resume 测量：warmup 不计入平均值，iters 结果输出到 stdout 供脚本转 CSV。 */
 	uint64_t *fork_ns;
 	uint64_t *restore_ns;
 	uint64_t *global_restore_ns;
@@ -537,6 +554,7 @@ static void usage(const char *prog)
 
 int main(int argc, char **argv)
 {
+	/* 子命令接口保持简单，shell 脚本负责跨 VM 编排和 CSV 拼接。 */
 	if (argc >= 2 && !strcmp(argv[1], "local")) {
 		if (argc != 6) {
 			usage(argv[0]);

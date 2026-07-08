@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# 显式停止由 start-cxlfork-vms.sh 启动并记录 pidfile 的 VM。
+# 该脚本不会扫描所有 qemu 进程，只处理本工作区 pids/ 下的目标。
 WS=${WS:-/home/xtl/cxlfork/cxlfork-repro}
 
 stop_one() {
+	# 先温和 SIGTERM，等待退出；超时后才 SIGKILL，并清理 stale pidfile。
 	local name=$1
 	local pidfile=$2
 	if [[ ! -f "$pidfile" ]]; then

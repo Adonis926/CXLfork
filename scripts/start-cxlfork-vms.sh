@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# 启动三类 VM：
+# - vm0/vm1：带共享 NVDIMM/CXL backend，用于 CXLfork prepare/resume。
+# - localfork：普通单机 baseline，不挂 CXL backend，不带 cxlfork cmdline 参数。
 WS=${WS:-/home/xtl/cxlfork/cxlfork-repro}
 QEMU=${QEMU:-qemu-system-x86_64}
 KERNEL=${KERNEL:-$WS/kernel/build-6.6.32/arch/x86/boot/bzImage}
-CXL_FILE=${CXL_FILE:-/dev/shm/cxl_mem}
-CXL_BACKEND_SIZE=${CXL_BACKEND_SIZE:-4G}
-CXL_PHYS=${CXL_PHYS:-0x484000000}
-CXL_SIZE=${CXL_SIZE:-0xfb000000}
+CXL_FILE=${CXL_FILE:-/dev/shm/cxl_mem}       # host 上共享给 VM0/VM1 的 CXL 后端文件。
+CXL_BACKEND_SIZE=${CXL_BACKEND_SIZE:-4G}     # QEMU memory-backend-file 大小。
+CXL_PHYS=${CXL_PHYS:-0x484000000}            # guest 内核 ioremap 的物理基址。
+CXL_SIZE=${CXL_SIZE:-0xfb000000}             # guest 内核看到的 CXL window 大小。
 MEM=${MEM:-16G}
 SMP=${SMP:-16}
 VM0_PORT=${VM0_PORT:-2200}
@@ -45,6 +48,7 @@ port_busy() {
 }
 
 require_port_free() {
+	# 防止覆盖仍在运行的 VM；端口占用时交给人工确认。
 	local name=$1
 	local port=$2
 	if port_busy "$port"; then
@@ -55,6 +59,7 @@ require_port_free() {
 }
 
 require_shm_space() {
+	# CXL_FILE 位于 /dev/shm 时必须先确认 tmpfs 有足够空间。
 	local need avail
 	need=$(size_to_bytes "$CXL_BACKEND_SIZE")
 	avail=$(df -B1 --output=avail "$(dirname "$CXL_FILE")" | tail -n 1 | tr -d ' ')
@@ -67,6 +72,7 @@ require_shm_space() {
 }
 
 ensure_cxl_file() {
+	# 只在没有 VM0/VM1 活跃时重建共享 CXL 后端文件，避免破坏运行中实验。
 	if pid_alive "$WS/pids/vm0.pid" || pid_alive "$WS/pids/vm1.pid"; then
 		return
 	fi
@@ -75,6 +81,7 @@ ensure_cxl_file() {
 }
 
 start_vm0() {
+	# VM0 是 checkpoint/prepare 端，挂载共享 CXL backend。
 	local pidfile=$WS/pids/vm0.pid
 	if pid_alive "$pidfile"; then
 		echo "vm0 already running pid=$(cat "$pidfile")"
@@ -109,6 +116,7 @@ start_vm0() {
 }
 
 start_vm1() {
+	# VM1 是 remote resume/invoke 端，和 VM0 使用同一个 CXL_FILE。
 	local pidfile=$WS/pids/vm1.pid
 	if pid_alive "$pidfile"; then
 		echo "vm1 already running pid=$(cat "$pidfile")"
@@ -143,6 +151,7 @@ start_vm1() {
 }
 
 start_localfork() {
+	# localfork VM 只用于普通 fork baseline，因此没有 nvdimm 设备和 cxlfork 参数。
 	local pidfile=$WS/pids/local.pid
 	if pid_alive "$pidfile"; then
 		echo "localfork already running pid=$(cat "$pidfile")"
@@ -172,6 +181,7 @@ start_localfork() {
 }
 
 main() {
+	# 调试时推荐先 cxl，再 localfork，避免 all 一次启动三个 VM 时难以定位失败点。
 	require_file "$KERNEL"
 	case "${1:-all}" in
 		all)

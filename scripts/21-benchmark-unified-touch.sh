@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# 主仓库最小 CXLfork benchmark 编排脚本：
+# - 在 host 编译 unified_touch_bench。
+# - 部署到 VM0/VM1/localfork。
+# - VM0 prepare，VM1 resume，localfork 跑普通 fork baseline。
 WS=${WS:-/home/xtl/cxlfork/cxlfork-repro}
 KBUILD=${KBUILD:-$WS/kernel/build-6.6.32}
 CXLFORK_KERNEL=${CXLFORK_KERNEL:-$WS/kernel/linux-6.6.32}
@@ -23,6 +27,7 @@ OUT=${OUT:-$WS/results/unified-touch-$(date +%Y%m%d-%H%M%S).csv}
 SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
 
 vm_ssh() {
+	# 统一封装 SSH，端口决定访问 VM0/VM1/localfork 哪个环境。
 	local port=$1
 	shift
 	ssh "${SSH_OPTS[@]}" -p "$port" ubuntu@localhost "$@"
@@ -35,6 +40,7 @@ vm_scp() {
 }
 
 field() {
+	# 从 benchmark stdout 的 key=value 文本中提取字段，后续拼成 CSV。
 	local text=$1
 	local name=$2
 
@@ -52,6 +58,7 @@ field() {
 }
 
 build() {
+	# 用户态 benchmark 依赖 samples/cxlfork/cxlfork_uapi.h，因此必须传 CXLFORK_KERNEL。
 	gcc -O2 -Wall -Wextra -I"$CXLFORK_KERNEL/samples/cxlfork" \
 		-o "$WS/scripts/unified_touch_bench" "$WS/scripts/unified_touch_bench.c"
 	if [[ "$CXLFORK_BUILTIN" != "1" ]]; then
@@ -61,6 +68,7 @@ build() {
 }
 
 deploy() {
+	# 部署到三个 VM；如果 cxlfork 内建为 y，则只需 chmod /dev/cxlfork。
 	local port
 
 	if [[ "$RUN_LOCAL" == "1" ]]; then
@@ -82,10 +90,12 @@ deploy() {
 }
 
 csv_header() {
+	# CSV header 是后续分析脚本的契约；LocalFork 行也必须严格对齐这些列。
 	printf 'system,policy,hot_stride_pages,bytes,mode,iters,warmup,key,prepare_ns,pte_image_build_ns,pte_image_pages,pt_page_image_build_ns,pt_page_image_pages,pt_page_image_entries,vma_tree_build_ns,vma_tree_pages,vma_tree_nodes,state_image_build_ns,state_image_pages,private_rebase_ns,private_rebase_entries,private_rebase_pages,global_detach_ns,fork_to_child_ns,restore_ns,global_restore_ns,pte_attach_ns,pte_attach_pages,direct_pte_install_ns,direct_pte_install_pages,pte_image_validate_ns,pt_page_image_validate_ns,vma_tree_validate_ns,state_image_validate_ns,private_rebase_validate_ns,global_attach_ns,touch_ns,total_ns,full_ns,pages,anon_pages,clean_file_pages,dirty_file_pages,faults,notes\n'
 }
 
 run_local() {
+	# localfork 是单机普通 fork baseline，没有 CXLfork 专属字段，缺失列写 0/NA。
 	local bytes=$1
 	local mode=$2
 	local out fork_ns touch_ns total_ns pages
@@ -102,6 +112,7 @@ run_local() {
 }
 
 run_cxlfork() {
+	# CXLfork 主路径：VM0 prepare 产生 CXL slot，VM1 resume/touch 并回填 breakdown。
 	local bytes=$1
 	local mode=$2
 	local key=$3
@@ -160,6 +171,7 @@ run_cxlfork() {
 }
 
 main() {
+	# 矩阵由 SIZES/MODES/POLICIES 控制，第一轮调试可保持小规模。
 	local bytes mode policy key
 
 	mkdir -p "$(dirname "$OUT")"
