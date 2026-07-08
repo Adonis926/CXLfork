@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-WS=${WS:-/home/xtl/cxlfork-ws}
+WS=${WS:-/home/xtl/cxlfork/cxlfork-repro}
 
 stop_one() {
 	local name=$1

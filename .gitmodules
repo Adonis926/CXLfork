@@ -1,15 +1,7 @@
 [submodule "kernel/linux-6.6.32"]
 	path = kernel/linux-6.6.32
 	url = https://github.com/qmyyxtl/cxlfork-linux-6.6.32.git
-	branch = remote-fork
-[submodule "criu-cxl"]
-	path = criu-cxl
-	url = https://github.com/qmyyxtl/cxlfork-criu-cxl.git
-	branch = criu-dev
-[submodule "mitosis-core"]
-	path = mitosis-core
-	url = https://github.com/ProjectMitosisOS/mitosis-core.git
-	branch = master
+	branch = cxlfork-only
 [submodule "cxlporter"]
 	path = cxlporter
 	url = https://github.com/qmyyxtl/cxlfork-cxlporter.git

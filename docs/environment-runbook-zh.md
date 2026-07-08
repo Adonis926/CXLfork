@@ -1,69 +1,105 @@
-# 当前环境运行文档
+# CXLfork 主线环境运行手册
 
-本文说明如何在一台新机器上 clone 仓库、初始化 submodule、编译内核、准备 VM 镜像、启动 VM，并运行当前 CXLfork / CXLporter / OpenWhisk benchmark。后半部分记录 104 服务器上的当前运行状态。
+本文面向当前阶段的主线复现：CXLfork、CXLporter、OpenWhisk baseline。默认目标环境为：
 
-## 0. 从零 clone 到跑通的最短路径
+- 目标机器：`xtl@10.0.16.91`
+- 工作目录：`/home/xtl/cxlfork/cxlfork-repro`
+- kernel 源码：`/home/xtl/cxlfork/cxlfork-repro/kernel/linux-6.6.32`
+- kernel build：`/home/xtl/cxlfork/cxlfork-repro/kernel/build-6.6.32`
+- bzImage：`/home/xtl/cxlfork/cxlfork-repro/kernel/build-6.6.32/arch/x86/boot/bzImage`
 
-目标机器需要：
+所有脚本仍支持通过环境变量覆盖 `WS`、`KERNEL`、端口和 benchmark 参数。
 
-- Linux host，支持 KVM。
-- `git`、`make`、`gcc`/`clang`、`bc`、`bison`、`flex`、`libssl-dev`、`libelf-dev` 等内核编译依赖。
-- `qemu-system-x86_64`、`qemu-img`。
-- `cloud-image-utils`，用于生成 cloud-init seed ISO。
-- 可选：Docker，用于 OpenWhisk standalone benchmark。
+## 1. 预检查
 
-Ubuntu host 可先安装：
-
-```bash
-sudo apt-get update
-sudo apt-get install -y \
-  git build-essential bc bison flex libssl-dev libelf-dev dwarves \
-  qemu-system-x86 qemu-utils cloud-image-utils openssh-client \
-  curl ca-certificates python3 make
-```
-
-clone 主仓库：
+进入工作目录：
 
 ```bash
-git clone -b remote-fork https://github.com/qmyyxtl/cxlfork-repro.git
-cd cxlfork-repro
+cd /home/xtl/cxlfork/cxlfork-repro
+pwd
+git branch --show-current
+git status --short
+git submodule status || true
 ```
 
-初始化 submodule：
+检查资源：
 
 ```bash
-git submodule update --init --recursive
+df -h .
+df -h /dev/shm
+free -h
+groups
+ls -l /dev/kvm
 ```
 
-如果子仓库需要显式切分支：
+检查端口和旧 VM：
 
 ```bash
-git -C kernel/linux-6.6.32 checkout remote-fork
-git -C cxlporter checkout main
-git -C criu-cxl checkout criu-dev
+ss -lntp | grep -E ':2200|:2201|:2202' || true
+ps -ef | grep qemu | grep -v grep || true
+ls -lh /dev/shm/cxl_mem 2>/dev/null || true
 ```
 
-编译 Linux 6.6.32 CXLfork 内核：
+如果 2200/2201/2202 已被占用，或存在无法确认归属的旧 QEMU 进程，先不要启动新 VM。
+
+## 2. 子模块
+
+当前主线只需要：
+
+```bash
+git submodule update --init cxlporter
+```
+
+如果当前 checkout 中记录了 kernel gitlink：
+
+```bash
+git ls-files --stage kernel/linux-6.6.32
+git submodule update --init kernel/linux-6.6.32
+git -C kernel/linux-6.6.32 checkout cxlfork-only
+```
+
+如果当前 checkout 没有 kernel gitlink，则使用已有的 kernel 目录，或手动 clone 私有 kernel 仓库到固定路径：
+
+```bash
+mkdir -p kernel
+git clone -b cxlfork-only https://github.com/qmyyxtl/cxlfork-linux-6.6.32.git kernel/linux-6.6.32
+```
+
+确认路径：
+
+```bash
+test -d kernel/linux-6.6.32
+test -d cxlporter
+```
+
+CRIU-CXL、Mitosis-CXL 和原始 Mitosis 不属于当前主线，默认不初始化、不编译、不测试。
+
+## 3. 编译内核
 
 ```bash
 mkdir -p kernel/build-6.6.32
-make -C kernel/linux-6.6.32 O="$PWD/kernel/build-6.6.32" olddefconfig
-make -C kernel/linux-6.6.32 O="$PWD/kernel/build-6.6.32" -j"$(nproc)" bzImage
+make -C kernel/linux-6.6.32 O=/home/xtl/cxlfork/cxlfork-repro/kernel/build-6.6.32 olddefconfig
+make -C kernel/linux-6.6.32 O=/home/xtl/cxlfork/cxlfork-repro/kernel/build-6.6.32 -j"$(nproc)" bzImage
 ```
 
-编译 CXLporter：
+编译后检查：
 
 ```bash
-make -C cxlporter clean all
+ls -lh kernel/build-6.6.32/arch/x86/boot/bzImage
+grep CONFIG_CXLFORK kernel/build-6.6.32/.config || true
 ```
 
-准备 VM 镜像和 cloud-init seed：
+期望：
 
-```bash
-mkdir -p images cloudinit logs pids sockets
+```text
+CONFIG_CXLFORK=y
 ```
 
-当前仓库不提交 qcow2 镜像，因为镜像文件很大。需要准备三个 Ubuntu 24.04 rootfs：
+如果 `CONFIG_CXLFORK` 未启用，不要继续启动 VM。
+
+## 4. 镜像和 Cloud-init
+
+需要三个 qcow2：
 
 ```text
 images/vm0.qcow2
@@ -71,534 +107,165 @@ images/vm1.qcow2
 images/normal-localfork.qcow2
 ```
 
-最简单方式是从 Ubuntu 24.04 cloud image 复制三份：
+需要两个 seed ISO：
 
-```bash
-curl -L -o images/base.img \
-  https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
-qemu-img convert -f qcow2 -O qcow2 images/base.img images/vm0.qcow2
-qemu-img convert -f qcow2 -O qcow2 images/base.img images/vm1.qcow2
-qemu-img convert -f qcow2 -O qcow2 images/base.img images/normal-localfork.qcow2
-qemu-img resize images/vm0.qcow2 20G
-qemu-img resize images/vm1.qcow2 20G
-qemu-img resize images/normal-localfork.qcow2 20G
+```text
+cloudinit/vm0-seed.iso
+cloudinit/vm1-seed.iso
 ```
 
-生成 cloud-init。下面的配置创建 `ubuntu` 用户，并允许 SSH 免密登录；实际复现时建议替换成自己的 SSH public key：
+当前默认 VM 用户：
+
+- 用户名：`ubuntu`
+- 密码：`123`
+- 可写入本机 SSH public key 以免密登录。
+
+本阶段不要自动删除或重建已有 qcow2 镜像。
+
+## 5. 分阶段启动 VM
+
+先启动 CXL 两个 VM：
 
 ```bash
-cat > cloudinit/vm0-meta-data <<'EOF'
-instance-id: cxlfork-vm0
-local-hostname: cxlfork-node0
-EOF
-
-cat > cloudinit/vm1-meta-data <<'EOF'
-instance-id: cxlfork-vm1
-local-hostname: cxlfork-node1
-EOF
-
-cat > cloudinit/vm0-user-data <<'EOF'
-#cloud-config
-users:
-  - default
-  - name: ubuntu
-    groups: sudo
-    shell: /bin/bash
-    sudo: ALL=(ALL) NOPASSWD:ALL
-    lock_passwd: false
-    ssh_authorized_keys: []
-chpasswd:
-  expire: false
-  users:
-    - {name: ubuntu, password: ubuntu, type: text}
-ssh_pwauth: true
-EOF
-
-cp cloudinit/vm0-user-data cloudinit/vm1-user-data
-cloud-localds cloudinit/vm0-seed.iso cloudinit/vm0-user-data cloudinit/vm0-meta-data
-cloud-localds cloudinit/vm1-seed.iso cloudinit/vm1-user-data cloudinit/vm1-meta-data
+WS=/home/xtl/cxlfork/cxlfork-repro \
+KERNEL=/home/xtl/cxlfork/cxlfork-repro/kernel/build-6.6.32/arch/x86/boot/bzImage \
+./scripts/start-cxlfork-vms.sh cxl
 ```
 
-启动 VM：
+确认 VM0/VM1 正常后，再启动 localfork：
 
 ```bash
-./scripts/start-cxlfork-vms.sh all
+WS=/home/xtl/cxlfork/cxlfork-repro \
+KERNEL=/home/xtl/cxlfork/cxlfork-repro/kernel/build-6.6.32/arch/x86/boot/bzImage \
+./scripts/start-cxlfork-vms.sh localfork
 ```
 
-启动脚本：
-
-- `scripts/start-cxlfork-vms.sh all`：启动 VM0、VM1、localfork。
-- `scripts/start-cxlfork-vms.sh cxl`：只启动 VM0、VM1。
-- `scripts/start-cxlfork-vms.sh vm0`：只启动 VM0。
-- `scripts/start-cxlfork-vms.sh vm1`：只启动 VM1。
-- `scripts/start-cxlfork-vms.sh localfork`：只启动 local baseline VM。
-
-停止脚本：
+停止：
 
 ```bash
-./scripts/stop-cxlfork-vms.sh all
+WS=/home/xtl/cxlfork/cxlfork-repro ./scripts/stop-cxlfork-vms.sh all
 ```
 
-等待 cloud-init 完成后检查 SSH：
+脚本默认端口：
+
+| VM | 端口 | 角色 |
+|---|---:|---|
+| VM0 | 2200 | checkpoint |
+| VM1 | 2201 | restore/invoke |
+| localfork | 2202 | local fork baseline |
+
+## 6. VM 验证
+
+host 检查：
 
 ```bash
-ssh -o StrictHostKeyChecking=no -p 2200 ubuntu@localhost 'uname -r; ls -l /dev/cxlfork || true'
-ssh -o StrictHostKeyChecking=no -p 2201 ubuntu@localhost 'uname -r; ls -l /dev/cxlfork || true'
-ssh -o StrictHostKeyChecking=no -p 2202 ubuntu@localhost 'uname -r'
-```
-
-运行 CXLporter serverless benchmark：
-
-```bash
-cd cxlporter
-FUNCTIONS="json:4194304 pyaes:4194304 html:8388608 touch:67108864" \
-POLICIES="mow moa hybrid" \
-POOL_SIZES="1 4" \
-REQUESTS=5 \
-WARMUP=1 \
-./scripts/30-benchmark-cxlporter.sh
-```
-
-运行 unified touch benchmark：
-
-```bash
-cd ..
-SIZES="4194304 67108864" \
-MODES="read write" \
-POLICIES="mow moa hybrid" \
-ITERS=5 \
-WARMUP=1 \
-./scripts/21-benchmark-unified-touch.sh
-```
-
-运行 OpenWhisk standalone benchmark：
-
-```bash
-cd cxlporter/openwhisk
-./scripts/start-standalone.sh
-RUNTIME=nodejs:20 REQUESTS=5 WARMUP=1 ./scripts/40-benchmark-openwhisk.sh
-REQUESTS=5 WARMUP=1 ./scripts/41-benchmark-local-node.sh
-./scripts/stop-standalone.sh
-```
-
-注意：OpenWhisk 路径依赖 Docker，并可能需要配置 Docker daemon 代理才能拉取 `openwhisk/standalone:nightly` 和 runtime images。
-
-## 1. 登录与工作目录
-
-104 服务器入口：
-
-```bash
-ssh xtl@10.0.16.104
-cd /home/xtl/cxlfork-ws
-```
-
-GitHub 或 Docker Hub 网络不稳定时使用代理：
-
-```bash
-export http_proxy=http://<user>:<password>@202.120.32.222:9081
-export https_proxy=http://<user>:<password>@202.120.32.222:9081
-export HTTP_PROXY="$http_proxy"
-export HTTPS_PROXY="$https_proxy"
-```
-
-不要把代理密码、GitHub token 或 sudo 密码写入 git。需要 sudo 时使用当前服务器账户对应密码。
-
-## 2. 顶层目录结构
-
-当前 `/home/xtl/cxlfork-ws` 主要目录：
-
-| 路径 | 说明 |
-|---|---|
-| `.gitmodules` | 记录 kernel、CRIU、Mitosis、CXLporter 子仓库 |
-| `cloudinit/` | VM0/VM1 cloud-init seed 和 user-data |
-| `criu-cxl/` | CRIU-CXL 子仓库 |
-| `criu-cxl-poc/` | CRIU-CXL proof-of-concept 静态程序/辅助产物 |
-| `cxlporter/` | CXLporter/serverless benchmark 子仓库 |
-| `images/` | VM qcow2 镜像，包括 `vm0.qcow2`、`vm1.qcow2`、`normal-localfork.qcow2` |
-| `kernel/` | Linux 6.6.32 源码、CXLfork 源码和 build 输出 |
-| `kernel-patches/` | 可查看的内核 patch 包 |
-| `logs/` | QEMU serial console log |
-| `mitosis-core/` | 原始 Mitosis 参考仓库 |
-| `pids/` | 当前 QEMU VM pidfile |
-| `results/` | unified touch、paper-style benchmark 等结果 |
-| `scripts/` | 当前主仓库 benchmark 脚本和辅助程序 |
-| `sockets/` | QEMU monitor socket |
-
-## 3. Git 仓库状态
-
-主仓库：
-
-```bash
-cd /home/xtl/cxlfork-ws
-git branch --show-current
-git log --oneline --decorate -5
-git submodule status --recursive
-```
-
-当前关键 commit：
-
-- 主仓库：`d1189b0 Update CXLporter OpenWhisk benchmark`
-- CXLporter：`be8022c Add OpenWhisk standalone benchmark`
-- kernel：`91a312cb2 Make Mitosis forkctl resume output unbuffered`
-- CRIU：`eac1d9add Disable CodeQL workflow for private fork`
-
-更新子仓库：
-
-```bash
-git submodule update --init --recursive
-```
-
-推送主仓库当前 HEAD 到远端 `remote-fork`：
-
-```bash
-cd /home/xtl/cxlfork-ws
-git push origin HEAD:remote-fork
-```
-
-推送 CXLporter：
-
-```bash
-cd /home/xtl/cxlfork-ws/cxlporter
-git push origin main
-```
-
-## 4. 当前 VM 拓扑
-
-当前有三个主要 VM：
-
-| VM | 用途 | SSH | 内核 | CXL |
-|---|---|---|---|---|
-| `vm0` | checkpoint 节点 | `ssh -p 2200 ubuntu@localhost` | `6.6.32-cxlfork+` | 有 `/dev/cxlfork` |
-| `vm1` | restore/invoke 节点 | `ssh -p 2201 ubuntu@localhost` | `6.6.32-cxlfork+` | 有 `/dev/cxlfork` |
-| `localfork` | 单机 local fork baseline | `ssh -p 2202 ubuntu@localhost` | 同一 `bzImage` | 无 CXL 参数 |
-
-检查 VM 是否运行：
-
-```bash
-cd /home/xtl/cxlfork-ws
 ps -ef | grep qemu | grep -v grep
-nc -z localhost 2200 && echo vm0_ssh_ok
-nc -z localhost 2201 && echo vm1_ssh_ok
-nc -z localhost 2202 && echo local_ssh_ok
+ls -lh /dev/shm/cxl_mem
+nc -z localhost 2200 && echo vm0_ssh_ok || echo vm0_not_ready
+nc -z localhost 2201 && echo vm1_ssh_ok || echo vm1_not_ready
+nc -z localhost 2202 && echo local_ssh_ok || echo local_not_ready
 ```
 
-检查 guest 内核与设备：
+VM0：
 
 ```bash
 ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2200 ubuntu@localhost \
-  'uname -r; ls -l /dev/cxlfork /dev/dax0.0 2>/dev/null || true'
+  'hostname; uname -r; cat /proc/cmdline; ls -l /dev/cxlfork /dev/dax0.0 2>/dev/null || true; dmesg | grep -i cxlfork | tail -40'
+```
 
+VM1：
+
+```bash
 ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2201 ubuntu@localhost \
-  'uname -r; ls -l /dev/cxlfork /dev/dax0.0 2>/dev/null || true'
+  'hostname; uname -r; cat /proc/cmdline; ls -l /dev/cxlfork /dev/dax0.0 2>/dev/null || true; dmesg | grep -i cxlfork | tail -40'
 ```
 
-## 5. CXL 共享内存如何被多个 VM 访问
+只有 VM0/VM1 都存在 `/dev/cxlfork`，且 dmesg 没有 CXL window 初始化失败时，才继续 benchmark。
 
-VM0 和 VM1 通过 QEMU 共享同一个 host 文件：
-
-```text
-/dev/shm/cxl_mem
-```
-
-QEMU 参数核心部分：
+## 7. Unified Touch 最小测试
 
 ```bash
--object memory-backend-file,id=cxlmem,share=on,mem-path=/dev/shm/cxl_mem,size=4G
--device nvdimm,id=cxldev,memdev=cxlmem,label-size=16M
-```
-
-guest 内核启动参数：
-
-```text
-cxlfork.cxl_phys=0x484000000 cxlfork.cxl_size=0xfb000000
-```
-
-含义：
-
-- host 上 `/dev/shm/cxl_mem` 是两个 VM 共同映射的后端。
-- QEMU 把它作为 NVDIMM 暴露给 VM。
-- guest 中 CXLfork driver 根据 `cxlfork.cxl_phys` 和 `cxlfork.cxl_size` 找到共享窗口。
-- VM0 checkpoint 写入该共享窗口。
-- VM1 restore/invoke 从同一共享窗口读取 checkpointed state。
-
-当前这不是物理 CXL 3.0 GIM，而是 QEMU 共享内存模拟。它足够验证论文里的共享 CXL medium 机制路径。
-
-## 6. 内核构建与启动内核
-
-当前 build 输出：
-
-```bash
-/home/xtl/cxlfork-ws/kernel/build-6.6.32/arch/x86/boot/bzImage
-```
-
-当前运行的 VM 都通过 QEMU `-kernel` 使用这个 bzImage。
-
-重新编译内核：
-
-```bash
-cd /home/xtl/cxlfork-ws/kernel/linux-6.6.32
-make O=/home/xtl/cxlfork-ws/kernel/build-6.6.32 olddefconfig
-make O=/home/xtl/cxlfork-ws/kernel/build-6.6.32 -j"$(nproc)" bzImage
-```
-
-内核 patch 可查看：
-
-```bash
-cd /home/xtl/cxlfork-ws
-less kernel-patches/cxlfork-built-in/cxlfork-built-in-linux-6.6.32.patch
-```
-
-启动脚本：
-
-```bash
-cd /home/xtl/cxlfork-ws
-./scripts/start-cxlfork-vms.sh all
-```
-
-停止脚本：
-
-```bash
-cd /home/xtl/cxlfork-ws
-./scripts/stop-cxlfork-vms.sh all
-```
-
-注意：
-
-- 当前 VM 已经在跑，不建议无准备地 kill QEMU。
-- 如需重启 VM，优先使用 `scripts/stop-cxlfork-vms.sh` 和 `scripts/start-cxlfork-vms.sh`。
-- `images/*.qcow2`、`cloudinit/*.iso`、`logs/`、`pids/`、`sockets/` 是运行环境产物，不适合提交进 git。
-
-查看当前 QEMU 命令：
-
-```bash
-cd /home/xtl/cxlfork-ws
-for p in pids/*.pid; do
-  echo "== $p =="
-  tr '\0' ' ' </proc/$(cat "$p")/cmdline
-  echo
-done
-```
-
-## 7. CXLporter benchmark
-
-CXLporter 子仓库：
-
-```bash
-cd /home/xtl/cxlfork-ws/cxlporter
-```
-
-构建：
-
-```bash
-make clean all
-```
-
-命令：
-
-```bash
-./cxlporter checkpoint <key> <function> <bytes>
-./cxlporter invoke <key> <function> <bytes> <policy> <pool> <requests> <warmup> [keepalive_us] [hot_stride_pages]
-./cxlporter local <function> <bytes> <requests> <warmup>
-```
-
-函数：
-
-```text
-touch json pyaes html float
-```
-
-策略：
-
-```text
-mow moa hybrid
-```
-
-标准 serverless benchmark：
-
-```bash
-cd /home/xtl/cxlfork-ws/cxlporter
-FUNCTIONS="json:4194304 pyaes:4194304 html:8388608 touch:67108864" \
-POLICIES="mow moa hybrid" \
-POOL_SIZES="1 4" \
-REQUESTS=5 \
+WS=/home/xtl/cxlfork/cxlfork-repro \
+CXLFORK_KERNEL=/home/xtl/cxlfork/cxlfork-repro/kernel/linux-6.6.32 \
+SIZES="4194304" \
+MODES="read write" \
+POLICIES="mow moa" \
+ITERS=2 \
 WARMUP=1 \
+RUN_LOCAL=1 \
+./scripts/21-benchmark-unified-touch.sh
+```
+
+期望：
+
+- 生成 `results/unified-touch-*.csv`。
+- LocalFork 行列数与 header 对齐。
+- CXLfork 行的 prepare/restore/touch/faults 字段非空。
+- `mow` 和 `moa` 能观察到差异。
+
+## 8. CXLporter Benchmark
+
+```bash
+cd /home/xtl/cxlfork/cxlfork-repro/cxlporter
+WS=/home/xtl/cxlfork/cxlfork-repro \
+FUNCTIONS="json:4194304 touch:67108864" \
+POLICIES="mow moa" \
+POOL_SIZES="1 4" \
+REQUESTS=2 \
+WARMUP=1 \
+RUN_LOCAL=1 \
 ./scripts/30-benchmark-cxlporter.sh
 ```
 
-输出：
+期望：
 
-```text
-cxlporter/results/cxlporter-*.csv
-cxlporter/results/checkpoint-store-*.csv
-```
+- 生成 `results/cxlporter-*.csv`。
+- 生成 `results/checkpoint-store-*.csv`。
+- CSV 列数校验通过。
+- `restore_ns`、`workload_ns`、`faults` 等字段非空。
 
-最新一次结果：
-
-```text
-cxlporter/results/cxlporter-20260703-025157.csv
-cxlporter/results/checkpoint-store-20260703-025157.csv
-```
-
-## 8. OpenWhisk standalone benchmark
-
-OpenWhisk 路径：
-
-```bash
-cd /home/xtl/cxlfork-ws/cxlporter/openwhisk
-```
+## 9. OpenWhisk Baseline
 
 启动：
 
 ```bash
-./scripts/start-standalone.sh
+cd /home/xtl/cxlfork/cxlfork-repro/cxlporter/openwhisk
+ROOT=/home/xtl/cxlfork/cxlfork-repro/cxlporter/openwhisk PROXY= ./scripts/start-standalone.sh
 ```
 
-该脚本会：
-
-- 使用 `openwhisk/standalone:nightly`。
-- 从镜像中提取 `openwhisk-standalone.jar`。
-- 下载 `wsk` CLI。
-- 启动 OpenWhisk standalone。
-- 解析日志中的 auth，并配置 `wsk property`。
-
-运行 OpenWhisk benchmark：
+benchmark：
 
 ```bash
-RUNTIME=nodejs:20 REQUESTS=5 WARMUP=1 ./scripts/40-benchmark-openwhisk.sh
-```
-
-运行 direct OpenWhisk runtime container baseline：
-
-```bash
-REQUESTS=5 WARMUP=1 ./scripts/41-benchmark-local-node.sh
-```
-
-停止 OpenWhisk：
-
-```bash
-./scripts/stop-standalone.sh
-```
-
-输出：
-
-```text
-cxlporter/openwhisk/results/openwhisk-*.csv
-cxlporter/openwhisk/results/local-node-*.csv
-```
-
-最新一次结果：
-
-```text
-cxlporter/openwhisk/results/openwhisk-20260703-023943.csv
-cxlporter/openwhisk/results/local-node-20260703-024045.csv
-```
-
-注意：
-
-- 默认 `nodejs:20`，因为 standalone 镜像已经预热 Node.js runtime。
-- `python:3.10` action 已保留，但 Python runtime 镜像曾因 Docker Hub EOF 拉取失败；镜像可用后可运行：
-
-```bash
-RUNTIME=python:3.10 REQUESTS=5 WARMUP=1 ./scripts/40-benchmark-openwhisk.sh
-```
-
-## 9. Unified touch benchmark
-
-主仓库脚本：
-
-```bash
-cd /home/xtl/cxlfork-ws
-./scripts/21-benchmark-unified-touch.sh
-```
-
-常用参数：
-
-```bash
-SIZES="4194304 67108864" \
-MODES="read write" \
-POLICIES="mow moa hybrid" \
-ITERS=5 \
+ROOT=/home/xtl/cxlfork/cxlfork-repro/cxlporter/openwhisk \
+RUNTIME=nodejs:20 \
+FUNCTIONS="json touch" \
+REQUESTS=2 \
 WARMUP=1 \
-./scripts/21-benchmark-unified-touch.sh
+./scripts/40-benchmark-openwhisk.sh
+
+ROOT=/home/xtl/cxlfork/cxlfork-repro/cxlporter/openwhisk \
+FUNCTIONS="json touch" \
+REQUESTS=2 \
+WARMUP=1 \
+./scripts/41-benchmark-local-node.sh
 ```
 
-输出：
-
-```text
-results/unified-touch-*.csv
-```
-
-该 benchmark 用于观察：
-
-- local fork touch 成本
-- CXLfork prepare/restore
-- read/write 下 `mow`、`moa`、`hybrid` 的 fault 和迁移成本
-
-## 10. CRIU-CXL
-
-进入仓库：
+停止：
 
 ```bash
-cd /home/xtl/cxlfork-ws/criu-cxl
+ROOT=/home/xtl/cxlfork/cxlfork-repro/cxlporter/openwhisk ./scripts/stop-standalone.sh
 ```
 
-当前状态：
+## 10. Stop / Report 条件
 
-```bash
-git branch --show-current
-git log --oneline -5
-```
+遇到以下情况应停止并报告：
 
-用途：
-
-- 验证 CRIU simple loop 风格 checkpoint/restore。
-- 验证 CXL image backend 可替换文件 image transport。
-
-目前 CRIU-CXL 不作为主 serverless benchmark 结论。
-
-## 11. 常见检查命令
-
-检查 `/dev/cxlfork`：
-
-```bash
-ssh -p 2200 ubuntu@localhost 'ls -l /dev/cxlfork; dmesg | tail -40'
-ssh -p 2201 ubuntu@localhost 'ls -l /dev/cxlfork; dmesg | tail -40'
-```
-
-给设备授权：
-
-```bash
-ssh -p 2200 ubuntu@localhost 'sudo chmod 666 /dev/cxlfork'
-ssh -p 2201 ubuntu@localhost 'sudo chmod 666 /dev/cxlfork'
-```
-
-检查 CXLporter 结果：
-
-```bash
-cd /home/xtl/cxlfork-ws/cxlporter
-ls -lt results/*.csv | head
-```
-
-检查 OpenWhisk 结果：
-
-```bash
-cd /home/xtl/cxlfork-ws/cxlporter/openwhisk
-ls -lt results/*.csv | head
-```
-
-检查 OpenWhisk action：
-
-```bash
-cd /home/xtl/cxlfork-ws/cxlporter/openwhisk
-./scripts/start-standalone.sh
-./wsk -i action list
-./wsk -i activation list --limit 5
-```
-
-## 12. 当前注意事项
-
-1. 主仓库存在大量未跟踪运行产物，包括 VM 镜像、结果 CSV、kernel build 输出、logs、pids。这些是环境产物，不应直接全部提交。
-2. CXLporter 子仓库已忽略 OpenWhisk jar、wsk、log、result CSV。
-3. OpenWhisk standalone 跑完后建议执行 `./scripts/stop-standalone.sh`，避免长期占用 Java 进程和 prewarm containers。
-4. 如果 Docker Hub 拉取失败，先确认 Docker daemon proxy 是否生效，再重试。
-5. benchmark 数字受当前 QEMU、host 负载、缓存状态影响；汇报时优先使用趋势和 breakdown，而不是绝对值。
+- 2200/2201/2202 被占用。
+- 存在无法确认归属的旧 QEMU。
+- `/dev/shm` 剩余空间不足 4G。
+- `CONFIG_CXLFORK` 未启用。
+- VM0/VM1 `/proc/cmdline` 缺少 `cxlfork.cxl_phys` 或 `cxlfork.cxl_size`。
+- VM0/VM1 没有 `/dev/cxlfork`。
+- dmesg 出现 cxlfork ioremap 或 CXL window 初始化失败。
+- benchmark 编译找不到 `samples/cxlfork/cxlfork_uapi.h`。
+- CSV 生成但关键 breakdown 字段为空或列数不一致。

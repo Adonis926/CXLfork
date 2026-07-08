@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-WS=${WS:-/home/xtl/cxlfork-ws}
+WS=${WS:-/home/xtl/cxlfork/cxlfork-repro}
 KBUILD=${KBUILD:-$WS/kernel/build-6.6.32}
-CXLFORK_KERNEL=${CXLFORK_KERNEL:-$WS/kernel/linux-6.6.32-cxlfork}
+CXLFORK_KERNEL=${CXLFORK_KERNEL:-$WS/kernel/linux-6.6.32}
 CXL_PHYS=${CXL_PHYS:-0x484000000}
 CXL_SIZE=${CXL_SIZE:-0xfb000000}
 LOCAL_PORT=${LOCAL_PORT:-2202}
@@ -95,8 +95,7 @@ run_local() {
 	touch_ns=$(field "$out" touch_ns)
 	total_ns=$(field "$out" total_ns)
 	pages=$(field "$out" pages)
-	printf 'LocalFork,local,0,%s,%s,%s,%s,NA,0,0,0,0,0,0,0,0,0,%s,0,0,0,0,0,0,0,0,%s,%s,%s,%s,NA,same volatile per-page touch loop
-' \
+	printf 'LocalFork,local,0,%s,%s,%s,%s,NA,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,%s,0,0,0,0,0,0,0,0,0,0,0,0,%s,%s,%s,%s,0,0,0,NA,same volatile per-page touch loop\n' \
 		"$bytes" "$mode" "$ITERS" "$WARMUP" "$fork_ns" "$touch_ns" "$total_ns" "$total_ns" "$pages" >>"$OUT"
 	printf '[LocalFork] bytes=%s mode=%s fork_ns=%s touch_ns=%s total_ns=%s\n' \
 		"$bytes" "$mode" "$fork_ns" "$touch_ns" "$total_ns"
