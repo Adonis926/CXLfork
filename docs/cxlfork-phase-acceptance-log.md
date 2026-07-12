@@ -250,3 +250,50 @@ Known limits after Phase 8:
 - The trampoline requires an address-compatible target process. The selftest enforces this with a non-PIE binary and a fixed mapped restore stack.
 - The private rebase image is still a validated offset manifest for cxlfork metadata, not a consumed reconstruction of Linux `task_struct` / `mm_struct` object graphs.
 - TLS restore remains a separate optional flag and was not claimed as part of this acceptance beyond preserving the existing path.
+
+## Phase 9 accepted: strict regular-file global state subset
+
+Date: 2026-07-13 Asia/Shanghai.
+
+Kernel commit: `5a7f0089e560` (`cxlfork: restore strict regular file state`).
+
+Scope accepted:
+
+- Added `CXLFORK_CAP_GLOBAL_FILE_STATE` for the tested global-state subset.
+- Strict fd capture is requested by using `CXLFORK_F_REOPEN_FDS` during prepare.
+- Strict fd capture records only user-opened fd numbers `>= 3`; stdin/stdout/stderr are treated as inherited environment and are outside this subset.
+- The active `/dev/cxlfork` control fd is skipped during capture so the ioctl fd does not poison the checkpoint.
+- Any captured fd `>= 3` that is not a regular file causes prepare to fail with `EOPNOTSUPP`. This covers pipe/socket/epoll/timerfd-style unsupported objects.
+- Restore reopens regular files by path, verifies inode/dev identity, restores the original fd number with `replace_fd()`, restores file offset with `vfs_llseek()`, and preserves supported file status flags such as `O_APPEND`.
+- `CXLFORK_F_APPLY_GLOBAL_STATE` continues to apply cwd, root, umask, signal mask, altstack metadata and rlimits; the selftest now verifies cwd, umask and signal mask.
+
+Hard evidence from clean VM validation:
+
+- The shared backend was reset with `rm -f /dev/shm/cxl_mem` before the acceptance run.
+- Same-VM validation was used for fd identity because VM0 and VM1 use separate qcow2 root filesystems; inode/dev equality is not meaningful across those images.
+- VM0 strict prepare reported:
+  `fdglobal-prepare key=72001 fd=7 pos=11 flags=append cwd=/tmp umask=027 sigusr1=blocked fds=1 verify=ok`.
+- VM0 strict restore reported:
+  `fdglobal-restore key=72001 policy=readonly fd=7 pos=11 flags=append cwd=/tmp umask=027 sigusr1=blocked verify=ok`.
+- The same fd/global restore check passed for MoW and MoA policies.
+- The failure suite now includes a strict pipe-fd checkpoint and passed, proving unsupported fd objects fail explicitly rather than being silently skipped.
+
+Regression validation:
+
+- Kernel `bzImage` build passed.
+- UAPI headers were refreshed from the O= build tree and cxlfork selftest rebuilt successfully.
+- VM0, VM1 and localfork each passed ABI 9/9.
+- VM1 readonly, MoW and MoA restore passed with Phase 7 CXL VMA lookup evidence.
+- Phase 8 thread-context resume still passed.
+- failure tests passed, including `FULL_PRIVATE_STATE` returning `EOPNOTSUPP` and strict pipe fd returning `EOPNOTSUPP`.
+- lifecycle tests passed.
+- conflict test passed with `errno=17 guard=ok verify=ok`.
+- 124 MiB prepare succeeded; 125 MiB prepare returned `ENOSPC`.
+- Strict dmesg check on VM0/VM1/localfork was clean: no `BUG`, `WARNING`, `Oops`, `Call Trace`, cxlfork mmap/remap diagnostics, bad page map, bad pagetable, general protection fault, page fault, or `non-zero pgtables` warning.
+
+Known limits after Phase 9:
+
+- The file-state subset requires the same root filesystem identity at restore time. In the current VM0/VM1 setup, root disks are separate images, so strict inode/dev verification is validated same-VM and would reject mismatched cross-VM files.
+- Only regular files are supported. Sockets, pipes, epoll, eventfd, timerfd, anon_inode and device fds are explicitly unsupported for strict fd capture.
+- Descriptor flags such as close-on-exec are not yet separately serialized; the accepted test covers file status flags and offset.
+- Namespace restore is still identity/path recording plus cwd/root application, not namespace recreation.
