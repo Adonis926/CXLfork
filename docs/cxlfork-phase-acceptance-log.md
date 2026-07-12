@@ -94,3 +94,42 @@ Known limits after Phase 5a:
 - MoW/MoA still use the previous local-PTE/fault paths; they do not yet use shared leaf CoW.
 - PTE mutation paths such as mprotect, fork, GUP/pagewalk mutation, mremap and partial munmap are not yet converted to materialize-on-write semantics.
 - `CXLFORK_CAP_PTE_LEAF_COW` remains unset.
+
+## Phase 6 accepted: shared PTE leaf materialize-on-write
+
+Date: 2026-07-13 Asia/Shanghai.
+
+Kernel commit: `469548dc7` (`cxlfork: materialize shared PTE leaves on write`).
+
+Scope accepted:
+
+- MoW restore now uses the same real shared CXL PTE leaf attach as readonly restore for PMD-aligned full-PMD regions.
+- The CXL leaf PTEs are explicitly marked `pte_special`, matching PFNMAP/mixed-PFN semantics and preventing core-MM from treating CXL PFNs as ordinary `struct page` mappings after materialization.
+- `handle_pte_fault()` detects a cxlfork shared leaf PMD before calling `pte_offset_map_nolock()` on write/unshare faults.
+- `cxlfork_materialize_shared_leaf_pmd()` allocates a normal local page-table page, copies the 4 KiB CXL leaf, switches the PMD under PMD lock, flushes the PMD range, and then lets existing Linux `do_wp_page()` perform data-page COW.
+- `QUERY_CAPS_V2` now reports `CXLFORK_CAP_PTE_LEAF_COW` in addition to `CXLFORK_CAP_REAL_SHARED_PTE_LEAF`.
+
+Hard evidence from VM validation:
+
+- VM1 MoW restore reported `shared_leaf_pfn=4769803 current_pmd_pfn=4769803` before write, proving the target mm initially points at the CXL PTE leaf.
+- After the first write, VM1 MoW reported `after_pmd_pfn=1124167`, which differs from `shared_leaf_pfn`, proving the writer materialized a local PTE leaf.
+- The second write reported `second_pmd_pfn=1124167`, proving repeated writes do not repeatedly copy the leaf.
+- Data-page PFN also changed from the shared CXL PFN to a local PFN on first write and stayed stable on the second write.
+- The shared checkpoint checksum remained unchanged after writes.
+
+Regression validation:
+
+- Kernel `bzImage` build passed.
+- UAPI headers were refreshed and cxlfork selftest rebuilt successfully.
+- Three VMs passed ABI 9/9.
+- VM1 readonly, MoW and MoA restore passed.
+- readonly/MoW/MoA conflict tests passed.
+- failure tests and lifecycle tests passed.
+- 124 MiB prepare succeeded; 125 MiB prepare returned `ENOSPC`.
+- Strict dmesg check on VM0/VM1/localfork was clean: no `BUG`, `WARNING`, `Oops`, `Call Trace`, cxlfork mmap/remap diagnostics, bad page map, bad pagetable, general protection fault, page fault, or `non-zero pgtables` warning.
+
+Known limits after Phase 6:
+
+- Leaf CoW is validated for the write-fault path used by MoW in the restricted single-thread anonymous model.
+- mprotect, fork, GUP/pagewalk mutation, mremap, partial munmap and khugepaged interactions are still not fully converted to materialize-on-write semantics.
+- The implementation still supports shared leaf attach only for PMD-aligned full-PMD regions; non-aligned regions fall back to reconstruction.

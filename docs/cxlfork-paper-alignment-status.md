@@ -106,3 +106,16 @@
 - 默认 16 GiB VM 验证通过：三台 VM ABI 9/9；VM1 readonly、MoW、MoA restore 通过；三种 conflict 测试通过；failure tests 和 lifecycle tests 通过；124 MiB prepare 成功；125 MiB prepare 返回 `ENOSPC`。
 - 三台 VM dmesg 严格检查 clean，未见 `BUG`, `WARNING`, `Oops`, `Call Trace`, cxlfork mmap/remap 诊断、bad pagetable、general protection fault、page fault 或 `non-zero pgtables`。
 - 阶段 5a 仍不是 leaf CoW：MoW/MoA 尚未使用 shared leaf，mprotect/fork/GUP/mremap/partial munmap 等 PTE mutation 入口尚未 materialize-on-write；`CXLFORK_CAP_PTE_LEAF_COW` 不可宣称。
+
+## 阶段 6 门禁结果（2026-07-13）
+
+- kernel `bzImage`（`CONFIG_CXLFORK=y`）通过；kernel commit 为 `469548dc7`。
+- MoW restore 对 PMD 对齐、整 PMD 覆盖的 region 现在使用真实 shared CXL PTE leaf attach；MoA 仍走旧的首次访问复制路径。
+- CXL leaf 中的 PTE 现在显式设置 `pte_special`，保持 PFNMAP/mixed-PFN 语义，避免 materialize 后 core-MM 把 CXL PFN 当普通 `struct page` 映射检查。
+- `handle_pte_fault()` 在写/unshare fault 对 shared leaf 调用 `cxlfork_materialize_shared_leaf_pmd()`，先复制整页 CXL PTE leaf 到本地普通页表页并切换 PMD，再让 Linux 原有 `do_wp_page()` 完成数据页 COW。
+- `QUERY_CAPS_V2` 现在报告 `CXLFORK_CAP_PTE_LEAF_COW`。
+- VM1 MoW 证据：写前 `shared_leaf_pfn=4769803 current_pmd_pfn=4769803`；首次写后 `after_pmd_pfn=1124167`；第二次写后 `second_pmd_pfn=1124167`。这证明写前共享 leaf，写后仅 writer 切换到本地 leaf，重复写不重复复制 leaf。
+- 数据页 CoW 证据：MoW 写前 `before_pfn=shared_pfn=4768768`；写后 `after_pfn=1117807`；第二次写 `second_pfn=1117807`。shared checkpoint checksum 写后保持不变。
+- 默认 16 GiB VM 验证通过：三台 VM ABI 9/9；VM1 readonly、MoW、MoA restore 通过；三种 conflict 测试通过；failure tests 和 lifecycle tests 通过；124 MiB prepare 成功；125 MiB prepare 返回 `ENOSPC`。
+- 三台 VM dmesg 严格检查 clean，未见 `BUG`, `WARNING`, `Oops`, `Call Trace`, cxlfork mmap/remap 诊断、bad page map、bad pagetable、general protection fault、page fault 或 `non-zero pgtables`。
+- 阶段 6 仍限于受限单线程匿名模型和 MoW 写 fault 路径；mprotect/fork/GUP/mremap/partial munmap/khugepaged 等 PTE mutation 入口尚未全部 materialize-on-write。
