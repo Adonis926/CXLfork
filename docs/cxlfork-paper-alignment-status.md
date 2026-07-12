@@ -46,8 +46,12 @@
 
 ## 阶段 1 门禁结果（2026-07-12）
 
-- kernel `bzImage`（`CONFIG_CXLFORK=y`）通过；kernel commit 为 `223a44415`。
+- kernel `bzImage`（`CONFIG_CXLFORK=y`）通过；kernel commit 为 `223a44415`，阶段 1 修复后为 `d15d37301`。
 - `tools/testing/selftests/cxlfork/cxlfork_test` 构建通过。
 - 三台 VM 的 QUERY_CAPS/ABI 9 项全部通过，未宣称真实 shared PTE leaf、leaf CoW、generation、consistent snapshot 或 FULL_PRIVATE_STATE。
-- VM0 的真实 prepare/inspect 门禁未通过：4 KiB 及 4 MiB 私有匿名映射的 prepare 返回 `ENOSPC`；临时诊断定位到 state-image capacity 使用了错误 slot 终点。修正诊断后 prepare 可返回，但随即 `INSPECT_V2` 对同 key 返回 `ENOENT`，说明 descriptor 发布/可见性仍不可靠。
-- 诊断代码已撤销，分支保持 clean；未进入阶段 2。下一步必须先修复并证明同 VM/跨 VM descriptor 的 slot 地址、发布顺序和 key 可见性，再重跑成功/边界/失败套件。
+- 先前 4 KiB/4 MiB prepare 的 `ENOSPC` 根因已定位：测试时手工以 `MEM=8G` 启动 VM，但脚本固定 `cxlfork.cxl_phys=0x484000000`，该地址只匹配默认 16 GiB guest 内存布局。8 GiB guest 的 e820 RAM 只到 `0x27fffffff`，driver ioremap 到错误物理窗口，descriptor 写后读回为 0。阶段 1 验证必须使用脚本默认 16 GiB VM，或后续改成自动发现 NVDIMM resource。
+- 修复 checkpoint image builder：构建阶段使用 prepare 已计算出的 expected slot 做容量和 offset 计算，并在每个 image 阶段校验 descriptor 的 `magic/version/slot/data_offset` invariant；descriptor 异常返回 `EILSEQ`，不再伪装成容量不足。
+- 修复 MoA PFN 稳定性：`PRIVATE_COW/MoA` restore 使用 `MAP_SHARED` 建立 cxlfork VMA，使首次 fault 插入的本地页不会被后续普通写入再次 core-MM COW；MoW/Hybrid 保持 `MAP_PRIVATE`。
+- 默认 16 GiB VM 验证通过：三台 VM ABI 9/9；VM0 4 MiB prepare/inspect checksum 一致；VM1 readonly、MoW、MoA restore 均 `verify=ok`，其中 MoW 写后 PFN 从共享 CXL PFN 切换到本地 PFN，MoA 首次访问本地 PFN 写后保持不变。
+- 边界/失败验证通过：unknown inspect key 返回 `ENOENT`；124 MiB prepare 成功；125 MiB prepare 返回 `ENOSPC`；三台 VM dmesg 未见 `BUG:`, `WARNING:`, `Oops`, remap 错误或 descriptor invariant 诊断。
+- 阶段 1 仍不声称 reliable slot generation、consistent checkpoint 或真实 shared PTE/VMA leaf；这些能力位保持 unset，进入阶段 2 前仍需实现受限一致 checkpoint。
