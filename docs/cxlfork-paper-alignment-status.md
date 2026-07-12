@@ -79,3 +79,16 @@
 - 跨 VM reader 验证通过：VM1 `hold` restore 映射时，VM0 `INSPECT` 看到 `readers=1`，VM0 `RELEASE` 返回 `EBUSY`；VM1 退出后 VM0 看到 `readers=0`，release 成功且 inspect 返回 `ENOENT`。
 - 边界验证通过：124 MiB prepare 成功；125 MiB prepare 返回 `ENOSPC`；三台 VM dmesg 未见 `BUG:`, `WARNING:`, `Oops`, remap 错误或 descriptor invariant 诊断。
 - 阶段 3 仍不是完整分布式锁服务：状态和 reader 使用 guest atomic/cmpxchg 操作在当前 QEMU shared backend 上验证通过，但还没有面向真实 CXL fabric 的持久化崩溃恢复、超时回收或多 writer 压测。
+
+## 阶段 4 门禁结果（2026-07-12）
+
+- kernel `bzImage`（`CONFIG_CXLFORK=y`）通过；kernel commit 为 `b3f9228a7`。
+- restore 地址空间语义收紧：direct map、MoW 和 MoA 路径均只使用 `MAP_FIXED_NOREPLACE`；目标地址已有映射时返回 `EEXIST`，不再回退到破坏性的 `MAP_FIXED` 覆盖。
+- 预期地址冲突属于正常失败路径；direct/COW restore 的 `-EEXIST` 不再写 `pr_warn`，避免 dmesg 噪声掩盖真实异常。
+- selftest 增强 `restore KEY POLICY`：MoW 写后必须从共享 CXL PFN 切换到本地 PFN；MoA 首次访问即为本地 PFN 且写后保持；重复写不得再次切换 PFN；写入后 `INSPECT` 的 shared checkpoint checksum 必须保持不变。
+- selftest 增加 `conflict KEY POLICY`：在目标 restore 地址预先建立 guard mapping，验证 readonly、MoW、MoA 三种策略均返回 `EEXIST`，且 guard 内容未被替换。
+- strict restore 暴露并修正了旧 lifecycle 测试假设：fork 出来的 child 会继承 parent prepare 使用的 `TEST_BASE` 映射；测试现在在 child hold restore 前先 `munmap()` 该继承映射，符合无冲突 restore 模型。
+- 默认 16 GiB VM 验证通过：三台 VM ABI 9/9；VM0 4 MiB prepare/inspect checksum 一致；VM1 readonly、MoW、MoA restore 均 `verify=ok`；三种 conflict 测试均 `verify=ok`；VM0 failure tests 和 lifecycle tests 均 `verify=ok`。
+- PFN 证据：MoW restore 初始 `current_pfn == shared_pfn`，首次写后切换到本地 PFN，第二次写保持同一 PFN；MoA 初始 `current_pfn != shared_pfn`，首次和第二次写均保持同一 PFN。
+- 边界验证通过：124 MiB prepare 成功；125 MiB prepare 返回 `ENOSPC`；三台 VM dmesg 严格检查未见 `BUG`, `WARNING`, `Oops`, `Call Trace`, `cxlfork: vm_mmap`, `cxlfork: cow vm_mmap` 或 `remap` 诊断。
+- 阶段 4 仍未实现 GUP/write、mprotect/fork 等所有 PTE mutation 入口的显式拒绝或 leaf materialization；MoW 仍依赖 Linux core-MM 对只读 PFNMAP 的 COW 行为，不等同于论文 Figure 5 的共享 PTE leaf CoW。
