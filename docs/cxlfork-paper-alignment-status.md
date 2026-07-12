@@ -43,3 +43,11 @@
 每阶段独立提交，依次要求：kernel build、用户态/selftest 构建、VM smoke、成功/边界/失败测试和 dmesg 检查。任一必需门禁无法运行或失败，即停止后续机制阶段并记录原因；不得把软件模拟命名为论文机制。
 
 当前 QEMU 环境可以验证共享 backend 页面、受限一致快照、跨 VM slot 协议以及 MoW/MoA 数据页 CoW。它不能提供真实 CXL fabric 延迟、带宽、NUMA/cache 行为或硬件性能结论。共享 PTE leaf、leaf CoW 和 Maple Tree attach 必须分别通过 CPU page walker/PFN 与实际查找路径的硬证明后才可报告为实现。
+
+## 阶段 1 门禁结果（2026-07-12）
+
+- kernel `bzImage`（`CONFIG_CXLFORK=y`）通过；kernel commit 为 `223a44415`。
+- `tools/testing/selftests/cxlfork/cxlfork_test` 构建通过。
+- 三台 VM 的 QUERY_CAPS/ABI 9 项全部通过，未宣称真实 shared PTE leaf、leaf CoW、generation、consistent snapshot 或 FULL_PRIVATE_STATE。
+- VM0 的真实 prepare/inspect 门禁未通过：4 KiB 及 4 MiB 私有匿名映射的 prepare 返回 `ENOSPC`；临时诊断定位到 state-image capacity 使用了错误 slot 终点。修正诊断后 prepare 可返回，但随即 `INSPECT_V2` 对同 key 返回 `ENOENT`，说明 descriptor 发布/可见性仍不可靠。
+- 诊断代码已撤销，分支保持 clean；未进入阶段 2。下一步必须先修复并证明同 VM/跨 VM descriptor 的 slot 地址、发布顺序和 key 可见性，再重跑成功/边界/失败套件。
