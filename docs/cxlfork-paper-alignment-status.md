@@ -119,3 +119,12 @@
 - 默认 16 GiB VM 验证通过：三台 VM ABI 9/9；VM1 readonly、MoW、MoA restore 通过；三种 conflict 测试通过；failure tests 和 lifecycle tests 通过；124 MiB prepare 成功；125 MiB prepare 返回 `ENOSPC`。
 - 三台 VM dmesg 严格检查 clean，未见 `BUG`, `WARNING`, `Oops`, `Call Trace`, cxlfork mmap/remap 诊断、bad page map、bad pagetable、general protection fault、page fault 或 `non-zero pgtables`。
 - 阶段 6 仍限于受限单线程匿名模型和 MoW 写 fault 路径；mprotect/fork/GUP/mremap/partial munmap/khugepaged 等 PTE mutation 入口尚未全部 materialize-on-write。
+
+## 阶段 7 可行性门槛结论（2026-07-13）
+
+- 阶段 7 目标是让 `find_vma()` / `mas_find()` 真实遍历 CXL 上的 Maple Tree/VMA leaf。
+- Linux 6.6 Maple Tree 的 `ma_root` 和节点 slot/parent 保存本机 kernel 虚拟指针，并使用低位编码；`mte_to_node()` / `mas_mn()` 会直接把 entry 解码为本机 `struct maple_node *` 后解引用。
+- `struct maple_node` 是来自 `maple_node_cache` 的 256-byte slab 对象，销毁和 rebalance 路径通过 RCU/slab 管理：`ma_free_rcu()`、`mt_free_rcu()`、`mas_destroy()`、`__mt_destroy()`、`mtree_destroy()`。
+- 因此不能把 CXL offset、CXL physical address 或当前自定义 VMA image 直接写入 `mm->mm_mt.ma_root`。这样会让 Maple Tree 把 CXL 内容当成本机 slab 节点解引用，并可能在释放时交给 `maple_node_cache`。
+- 安全实现需要 Maple Tree 级别扩展：新增可识别的 CXL node 类型或 accessor、所有 lookup 路径的 CXL offset 转换、所有 mutation 路径的 materialize、RCU/free 特判，以及 VMA entry 指针/对象图策略。
+- 阶段 7 在可行性门槛处阻塞；当前 VMA 机制仍只能称为 image-driven reconstruction，不能宣称真实 Maple Tree attach 或 VMA constant-time restore。

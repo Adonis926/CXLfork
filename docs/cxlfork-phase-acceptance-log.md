@@ -133,3 +133,33 @@ Known limits after Phase 6:
 - Leaf CoW is validated for the write-fault path used by MoW in the restricted single-thread anonymous model.
 - mprotect, fork, GUP/pagewalk mutation, mremap, partial munmap and khugepaged interactions are still not fully converted to materialize-on-write semantics.
 - The implementation still supports shared leaf attach only for PMD-aligned full-PMD regions; non-aligned regions fall back to reconstruction.
+
+## Phase 7 gate: real Maple Tree/VMA leaf attach blocked
+
+Date: 2026-07-13 Asia/Shanghai.
+
+Target from the plan: make `find_vma()` / `mas_find()` actually traverse CXL-hosted VMA/Maple Tree nodes, then materialize local nodes on VMA mutation.
+
+Audit result:
+
+- Linux 6.6 `mm_struct.mm_mt` is a real `struct maple_tree` whose `ma_root` stores kernel virtual pointers with low-bit Maple encoding.
+- `struct maple_node` is a 256-byte slab object allocated from `maple_node_cache`.
+- Maple node entries and parent pointers are kernel virtual pointers, not offsets.
+- Maple Tree lookup uses helpers such as `mte_to_node()` / `mas_mn()` that directly decode and dereference those local kernel pointers.
+- Maple Tree destruction and rebalance paths use RCU and slab freeing: `ma_free_rcu()`, `mt_free_rcu()`, `mas_destroy()`, `__mt_destroy()`, and `mtree_destroy()` eventually return nodes to `maple_node_cache`.
+
+Blocking invariant:
+
+A CXL VMA image cannot be attached to `mm->mm_mt` by writing a CXL offset or CXL physical address into `ma_root`. The Maple Tree code would treat it as a local encoded `struct maple_node *`, dereference it as a kernel virtual address, and later attempt RCU/slab lifecycle operations on it.
+
+A safe real VMA leaf attach would require a dedicated Maple Tree extension, not a driver-only change:
+
+1. A new encoded node type or accessor path that can distinguish CXL-backed nodes from slab-backed nodes.
+2. CXL offset-to-local alias translation in every Maple Tree lookup path used by `find_vma()` / `mas_find()`.
+3. Mutation materialization before `mas_store()`, `mas_erase()`, VMA split/merge, mprotect, munmap, mremap, brk and VMA iterator updates.
+4. RCU/free handling that never sends CXL nodes to `maple_node_cache` and never treats CXL image nodes as local slab objects.
+5. A strategy for entries inside CXL nodes: either local `struct vm_area_struct *` pointers with per-restore reconstruction, or a separate CXL VMA object graph and local materialization layer.
+
+Decision:
+
+Phase 7 is blocked at the feasibility gate. The existing cxlfork VMA image remains image-driven reconstruction. It must not be reported as real Maple Tree attach or constant-time VMA restore. No kernel behavior was changed for this phase.
