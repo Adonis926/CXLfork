@@ -55,3 +55,14 @@
 - 默认 16 GiB VM 验证通过：三台 VM ABI 9/9；VM0 4 MiB prepare/inspect checksum 一致；VM1 readonly、MoW、MoA restore 均 `verify=ok`，其中 MoW 写后 PFN 从共享 CXL PFN 切换到本地 PFN，MoA 首次访问本地 PFN 写后保持不变。
 - 边界/失败验证通过：unknown inspect key 返回 `ENOENT`；124 MiB prepare 成功；125 MiB prepare 返回 `ENOSPC`；三台 VM dmesg 未见 `BUG:`, `WARNING:`, `Oops`, remap 错误或 descriptor invariant 诊断。
 - 阶段 1 仍不声称 reliable slot generation、consistent checkpoint 或真实 shared PTE/VMA leaf；这些能力位保持 unset，进入阶段 2 前仍需实现受限一致 checkpoint。
+
+## 阶段 2 门禁结果（2026-07-12）
+
+- kernel `bzImage`（`CONFIG_CXLFORK=y`）通过；kernel commit 为 `26b10a209`。
+- checkpoint 支持模型收紧为单线程、私有匿名、4 KiB 页。`FULL_PRIVATE_STATE` 返回 `EOPNOTSUPP`；多线程调用返回 `EBUSY`；shared anonymous 和 file-backed private VMA 返回 `EOPNOTSUPP`，失败后不发布 READY slot。
+- checkpoint 页面复制顺序改为：读取源 PTE/PFN，短期 pin 页面并复制到 CXL，再复核 PTE 值、PTE PFN 和 pinned page PFN 均未变化。复核失败返回 `EBUSY`，不发布 READY slot。
+- `QUERY_CAPS_V2` 现在报告 `CXLFORK_CAP_CONSISTENT_SINGLE_THREAD`，但仍不报告 reliable slot generation、FULL_PRIVATE_STATE、真实 shared PTE/VMA leaf、leaf CoW 或 A-bit hybrid。
+- selftest 增加 `failures KEY`：验证 FULL_PRIVATE_STATE、多线程、shared anonymous、file-backed private 四类 unsupported 路径均明确失败且 inspect 返回 `ENOENT`。
+- 默认 16 GiB VM 验证通过：三台 VM ABI 9/9；VM0 4 MiB prepare/inspect checksum 一致；VM0 failure tests `verify=ok`；VM1 readonly、MoW、MoA restore 均 `verify=ok`。
+- 边界验证通过：124 MiB prepare 成功；125 MiB prepare 返回 `ENOSPC`；三台 VM dmesg 未见 `BUG:`, `WARNING:`, `Oops`, remap 错误或 descriptor invariant 诊断。
+- 阶段 2 仍依赖调用者协作式静止；未实现跨 VM generation/refcount slot 协议，未证明长期 GUP/pin 拒绝的完整性，也未恢复真实执行上下文。
