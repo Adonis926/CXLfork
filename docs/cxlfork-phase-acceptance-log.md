@@ -53,3 +53,44 @@ No kernel behavior was changed for Phase 5. The next viable engineering step is 
 4. Only after those hooks exist should `CXLFORK_CAP_REAL_SHARED_PTE_LEAF` be set.
 
 Phase 5 is therefore not accepted. The work stopped at the planned feasibility gate rather than falling back to image reconstruction under the shared-leaf name.
+
+## Phase 5a accepted: readonly real shared PTE leaf attach
+
+Date: 2026-07-13 Asia/Shanghai.
+
+Kernel commit: `fbc9e54b3` (`cxlfork: attach readonly mappings to shared PTE leaves`).
+
+Scope accepted:
+
+- `CONFIG_CXLFORK` is now `bool`, because core-MM calls cxlfork shared-leaf helpers and cannot depend on a loadable module symbol.
+- Added `include/linux/cxlfork_mm.h` as the minimal core-MM interface.
+- `mm/memory.c` now recognizes cxlfork shared CXL PTE leaf PMDs in zap/free paths. It clears the PMD, flushes the PMD range, updates page-table accounting, and never calls `pmd_page()`, `pmd_page_vaddr()` or `pte_free_tlb()` on the CXL PFN.
+- Readonly restore uses real CXL PTE leaf attach for PMD-aligned, full-PMD regions. Non-aligned regions fall back to the older direct PTE reconstruction path.
+- `QUERY_CAPS_V2` now reports `CXLFORK_CAP_REAL_SHARED_PTE_LEAF` but still does not report `CXLFORK_CAP_PTE_LEAF_COW`.
+- `INSPECT_V2` now reports `shared_leaf_pfn`, `current_pmd`, and `current_pmd_pfn`.
+
+Hard evidence from VM validation:
+
+- 4 MiB checkpoint succeeded with two regions and 1024 pages.
+- VM1 readonly restore reported `shared_pfn=4768768 before_pfn=4768768 shared_leaf_pfn=4769803 current_pmd_pfn=4769803 verify=ok`.
+- The equality `current_pmd_pfn == shared_leaf_pfn` proves the target mm PMD points at the CXL PTE leaf page.
+- The equality `before_pfn == shared_pfn` proves the PTE read through that leaf maps the CXL data page.
+- User-space checksum verification passed after CPU reads from the restored mapping.
+
+Regression validation:
+
+- Kernel `bzImage` build passed.
+- UAPI headers were refreshed and `tools/testing/selftests/cxlfork/cxlfork_test` rebuilt successfully.
+- Three VMs passed ABI 9/9.
+- VM1 readonly, MoW and MoA restore passed.
+- readonly/MoW/MoA conflict tests passed.
+- failure tests and lifecycle tests passed.
+- 124 MiB prepare succeeded; 125 MiB prepare returned `ENOSPC`.
+- Strict dmesg check on VM0/VM1/localfork was clean: no `BUG`, `WARNING`, `Oops`, `Call Trace`, cxlfork mmap/remap diagnostics, bad pagetable, general protection fault, page fault, or `non-zero pgtables` warning.
+
+Known limits after Phase 5a:
+
+- Shared leaf attach is readonly-only and limited to PMD-aligned full-PMD regions.
+- MoW/MoA still use the previous local-PTE/fault paths; they do not yet use shared leaf CoW.
+- PTE mutation paths such as mprotect, fork, GUP/pagewalk mutation, mremap and partial munmap are not yet converted to materialize-on-write semantics.
+- `CXLFORK_CAP_PTE_LEAF_COW` remains unset.

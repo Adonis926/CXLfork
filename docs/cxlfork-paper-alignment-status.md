@@ -92,3 +92,17 @@
 - PFN 证据：MoW restore 初始 `current_pfn == shared_pfn`，首次写后切换到本地 PFN，第二次写保持同一 PFN；MoA 初始 `current_pfn != shared_pfn`，首次和第二次写均保持同一 PFN。
 - 边界验证通过：124 MiB prepare 成功；125 MiB prepare 返回 `ENOSPC`；三台 VM dmesg 严格检查未见 `BUG`, `WARNING`, `Oops`, `Call Trace`, `cxlfork: vm_mmap`, `cxlfork: cow vm_mmap` 或 `remap` 诊断。
 - 阶段 4 仍未实现 GUP/write、mprotect/fork 等所有 PTE mutation 入口的显式拒绝或 leaf materialization；MoW 仍依赖 Linux core-MM 对只读 PFNMAP 的 COW 行为，不等同于论文 Figure 5 的共享 PTE leaf CoW。
+
+## 阶段 5a 门禁结果（2026-07-13）
+
+- kernel `bzImage`（`CONFIG_CXLFORK=y`）通过；kernel commit 为 `fbc9e54b3`。
+- `CONFIG_CXLFORK` 从 `tristate` 收紧为 `bool`，因为 core-MM 已调用 cxlfork shared-leaf helper，不能依赖可卸载模块 symbol。
+- 新增 `include/linux/cxlfork_mm.h` 作为 core-MM 与 cxlfork 的最小接口。
+- `mm/memory.c` 的 zap/free 路径识别 cxlfork shared CXL PTE leaf PMD：清 PMD、flush 对应 PMD 范围、更新页表 accounting，且不对 CXL PFN 调用 `pmd_page()`、`pmd_page_vaddr()` 或 `pte_free_tlb()`。
+- readonly restore 对 PMD 对齐且整 PMD 覆盖的 region 安装真实 CXL PTE leaf；非对齐 region 回退到阶段 4 的 direct PTE reconstruction。
+- `QUERY_CAPS_V2` 现在报告 `CXLFORK_CAP_REAL_SHARED_PTE_LEAF`；`CXLFORK_CAP_PTE_LEAF_COW` 仍保持 unset。
+- `INSPECT_V2` 增加 `shared_leaf_pfn/current_pmd/current_pmd_pfn`，用于证明目标 mm 的 PMD 是否指向 CXL leaf。
+- VM1 readonly restore 证据：`shared_pfn=4768768 before_pfn=4768768 shared_leaf_pfn=4769803 current_pmd_pfn=4769803 verify=ok`。其中 `current_pmd_pfn == shared_leaf_pfn` 证明 CPU page walker 使用目标 mm 中指向 CXL leaf 的 PMD；`before_pfn == shared_pfn` 证明 leaf 内 PTE 映射的是 CXL 数据页。
+- 默认 16 GiB VM 验证通过：三台 VM ABI 9/9；VM1 readonly、MoW、MoA restore 通过；三种 conflict 测试通过；failure tests 和 lifecycle tests 通过；124 MiB prepare 成功；125 MiB prepare 返回 `ENOSPC`。
+- 三台 VM dmesg 严格检查 clean，未见 `BUG`, `WARNING`, `Oops`, `Call Trace`, cxlfork mmap/remap 诊断、bad pagetable、general protection fault、page fault 或 `non-zero pgtables`。
+- 阶段 5a 仍不是 leaf CoW：MoW/MoA 尚未使用 shared leaf，mprotect/fork/GUP/mremap/partial munmap 等 PTE mutation 入口尚未 materialize-on-write；`CXLFORK_CAP_PTE_LEAF_COW` 不可宣称。
