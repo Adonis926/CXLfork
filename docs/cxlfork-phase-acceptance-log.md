@@ -205,3 +205,48 @@ Known limits after Phase 7:
 - CXL Maple nodes currently contain local `struct vm_area_struct *` entries reconstructed in the restoring process; they do not yet contain portable CXL-offset VMA objects.
 - The CXL Maple tree is attached only during the `INSPECT_V2` probe transaction and is restored to the local tree before returning to user space. This avoids `exit_mmap()`, `munmap`, mprotect, split/merge and RCU/slab free paths acting on CXL nodes.
 - Therefore this phase proves that Linux `find_vma()` can traverse CXL-hosted Maple nodes under controlled conditions. It still does not prove constant-time VMA restore or persistent shared VMA leaf lifecycle across arbitrary VMA mutation.
+
+## Phase 8 accepted: restricted user thread context resume
+
+Date: 2026-07-13 Asia/Shanghai.
+
+Kernel commit: `16c8fa021d88` (`cxlfork: validate user thread context resume`).
+
+Scope accepted:
+
+- Added `CXLFORK_CAP_USER_THREAD_CONTEXT_RESUME` to distinguish the implemented restricted context-resume mechanism from unsupported full private-state restore.
+- `CXLFORK_CAP_FULL_PRIVATE_STATE` remains unset and `CXLFORK_F_FULL_PRIVATE_STATE` prepare still returns `EOPNOTSUPP`.
+- `CXLFORK_F_USER_THREAD_STATE` lets the checkpoint caller store an explicit user IP/SP in the CXL state image.
+- `CXLFORK_F_APPLY_THREAD_STATE` now validates that the saved IP/SP are nonzero user addresses and returns an error instead of silently doing nothing.
+- Thread register application is now performed after restore output has been copied to user memory, so the final syscall return path is the first point where the saved IP/SP take effect.
+- The cxlfork selftest is linked `-no-pie` for stable cross-VM text addresses and adds `threadctx-prepare` / `threadctx-restore`.
+
+Hard evidence from clean VM validation:
+
+- The shared backend was reset with `rm -f /dev/shm/cxl_mem` before the acceptance run.
+- VM0 prepared a checkpoint with saved user context:
+  `threadctx-prepare key=71001 ip=4029f0 sp=60000010fff8 pages=1024 checksum=6781908030244848515 verify=ok`.
+- VM1 restored that checkpoint with `CXLFORK_F_APPLY_THREAD_STATE` and printed:
+  `threadctx-resume verify=ok`.
+- The restore command would print `threadctx restore returned without jumping to saved IP` and exit nonzero if the ioctl returned to its original call site. The observed output proves the syscall returned through the saved IP/SP trampoline instead.
+- The same saved-context resume check passed for readonly, MoW and MoA restore policies.
+
+Regression validation:
+
+- Kernel `bzImage` build passed.
+- UAPI headers were refreshed from the O= build tree and cxlfork selftest rebuilt successfully.
+- VM0, VM1 and localfork each passed ABI 9/9.
+- VM1 readonly, MoW and MoA restore passed with Phase 7 CXL VMA lookup evidence.
+- failure tests passed, including `FULL_PRIVATE_STATE` returning `EOPNOTSUPP`.
+- lifecycle tests passed.
+- conflict test passed with `errno=17 guard=ok verify=ok`.
+- 124 MiB prepare succeeded; 125 MiB prepare returned `ENOSPC`.
+- Strict dmesg check on VM0/VM1/localfork was clean: no `BUG`, `WARNING`, `Oops`, `Call Trace`, cxlfork mmap/remap diagnostics, bad page map, bad pagetable, general protection fault, page fault, or `non-zero pgtables` warning.
+
+Known limits after Phase 8:
+
+- This is not arbitrary-process `FULL_PRIVATE_STATE` restore.
+- The restored IP/SP are explicitly supplied through `CXLFORK_F_USER_THREAD_STATE`; the kernel does not yet capture and resume an asynchronously checkpointed instruction pointer from an arbitrary source process.
+- The trampoline requires an address-compatible target process. The selftest enforces this with a non-PIE binary and a fixed mapped restore stack.
+- The private rebase image is still a validated offset manifest for cxlfork metadata, not a consumed reconstruction of Linux `task_struct` / `mm_struct` object graphs.
+- TLS restore remains a separate optional flag and was not claimed as part of this acceptance beyond preserving the existing path.
