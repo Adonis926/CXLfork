@@ -66,3 +66,16 @@
 - 默认 16 GiB VM 验证通过：三台 VM ABI 9/9；VM0 4 MiB prepare/inspect checksum 一致；VM0 failure tests `verify=ok`；VM1 readonly、MoW、MoA restore 均 `verify=ok`。
 - 边界验证通过：124 MiB prepare 成功；125 MiB prepare 返回 `ENOSPC`；三台 VM dmesg 未见 `BUG:`, `WARNING:`, `Oops`, remap 错误或 descriptor invariant 诊断。
 - 阶段 2 仍依赖调用者协作式静止；未实现跨 VM generation/refcount slot 协议，未证明长期 GUP/pin 拒绝的完整性，也未恢复真实执行上下文。
+
+## 阶段 3 门禁结果（2026-07-12）
+
+- kernel `bzImage`（`CONFIG_CXLFORK=y`）通过；kernel commit 为 `7ab337872`。
+- slot descriptor 增加 `state/generation/reader_count`。prepare 使用 shared `state` 从 `FREE` 原子 claim 到 `WRITING`，发布时 `WRITING -> READY`；release 使用 `READY -> RELEASING -> FREE`。
+- 同 slot 活跃对象不允许静默覆盖：同 slot 新 key prepare 返回 `EEXIST`，原 key generation 和 READY 对象保持不变。
+- restore/fault/direct-map VMA 都携带 generation 并持有 reader 引用；release 在 `reader_count != 0` 时返回 `EBUSY`。VMA close 后 reader 引用释放，release 可成功。
+- `QUERY_CAPS_V2` 现在报告 `CXLFORK_CAP_RELIABLE_SLOT_GENERATION`；`INSPECT_V2` 返回 generation、state、reader_count。
+- selftest 增加 `lifecycle KEY` 和 `hold KEY SECONDS`：验证 same-slot collision、active release `EBUSY`、reader_count 归零后 release 成功，以及 release 后 inspect 返回 `ENOENT`。
+- 默认 16 GiB VM 验证通过：三台 VM ABI 9/9；VM0 4 MiB prepare/inspect checksum 一致；VM0 failure tests `verify=ok`；VM0 lifecycle tests `verify=ok`；VM1 readonly、MoW、MoA restore 均 `verify=ok`。
+- 跨 VM reader 验证通过：VM1 `hold` restore 映射时，VM0 `INSPECT` 看到 `readers=1`，VM0 `RELEASE` 返回 `EBUSY`；VM1 退出后 VM0 看到 `readers=0`，release 成功且 inspect 返回 `ENOENT`。
+- 边界验证通过：124 MiB prepare 成功；125 MiB prepare 返回 `ENOSPC`；三台 VM dmesg 未见 `BUG:`, `WARNING:`, `Oops`, remap 错误或 descriptor invariant 诊断。
+- 阶段 3 仍不是完整分布式锁服务：状态和 reader 使用 guest atomic/cmpxchg 操作在当前 QEMU shared backend 上验证通过，但还没有面向真实 CXL fabric 的持久化崩溃恢复、超时回收或多 writer 压测。
