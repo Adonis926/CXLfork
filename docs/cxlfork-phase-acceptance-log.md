@@ -163,3 +163,45 @@ A safe real VMA leaf attach would require a dedicated Maple Tree extension, not 
 Decision:
 
 Phase 7 is blocked at the feasibility gate. The existing cxlfork VMA image remains image-driven reconstruction. It must not be reported as real Maple Tree attach or constant-time VMA restore. No kernel behavior was changed for this phase.
+
+## Phase 7 accepted: bounded CXL Maple-node lookup proof
+
+Date: 2026-07-13 Asia/Shanghai.
+
+Kernel commit: `bb15f4f2daec` (`cxlfork: probe VMA lookups through CXL Maple nodes`).
+
+Scope accepted:
+
+- Added a bounded Maple Tree probe path that copies the current process `mm->mm_mt` node structure into a reserved CXL scratch area at the end of the checkpoint slot.
+- The copied CXL Maple nodes preserve Maple low-bit node encoding, child slots, parent pointers and root parent encoding for the current kernel address space.
+- `INSPECT_V2` temporarily switches `mm->mm_mt.ma_root` to the CXL-hosted root, calls `find_vma()`, records the lookup result, and immediately restores the original local Maple root before returning to user space.
+- Added `MT_FLAGS_CXLFORK_CXL_NODES` as a guard so an accidentally attached CXL Maple tree is not destroyed through the normal slab/RCU Maple free path.
+- `INSPECT_V2` now reports `vma_maple_root_pfn`, `vma_maple_nodes`, and `vma_lookup_start/end`.
+- The cxlfork selftest now requires `CXLFORK_CAP_REAL_SHARED_VMA_LEAF` and verifies that restore-time inspect observes a CXL VMA node lookup covering the restored address.
+
+Hard evidence from clean VM validation:
+
+- The shared backend was reset with `rm -f /dev/shm/cxl_mem` before the acceptance run.
+- VM1 readonly restore reported `vma_root_pfn=4800512 vma_nodes=3 vma_lookup=500000000000-500000200000 verify=ok`.
+- VM1 MoW restore reported the same CXL VMA root evidence and also preserved Phase 6 leaf CoW evidence: shared PMD PFN before write, local PMD PFN after write.
+- VM1 MoA restore reported `vma_root_pfn=4800512 vma_nodes=3 vma_lookup=500000000000-500000200000 verify=ok`.
+- The `vma_lookup` range covers the first restored page, proving `find_vma()` returned the expected VMA while `mm->mm_mt.ma_root` pointed at the CXL-hosted Maple root.
+
+Regression validation:
+
+- Kernel `bzImage` build passed.
+- UAPI headers were refreshed from the O= build tree and cxlfork selftest rebuilt successfully.
+- VM0, VM1 and localfork each passed ABI 9/9.
+- VM1 readonly, MoW and MoA restore passed with CXL VMA lookup evidence.
+- failure tests passed.
+- lifecycle tests passed.
+- conflict test passed with `errno=17 guard=ok verify=ok`.
+- 124 MiB prepare succeeded; 125 MiB prepare returned `ENOSPC`.
+- Strict dmesg check on VM0/VM1/localfork was clean: no `BUG`, `WARNING`, `Oops`, `Call Trace`, cxlfork mmap/remap diagnostics, bad page map, bad pagetable, general protection fault, page fault, or `non-zero pgtables` warning.
+
+Known limits after Phase 7:
+
+- This is a bounded lookup proof, not a complete cross-VM VMA object graph.
+- CXL Maple nodes currently contain local `struct vm_area_struct *` entries reconstructed in the restoring process; they do not yet contain portable CXL-offset VMA objects.
+- The CXL Maple tree is attached only during the `INSPECT_V2` probe transaction and is restored to the local tree before returning to user space. This avoids `exit_mmap()`, `munmap`, mprotect, split/merge and RCU/slab free paths acting on CXL nodes.
+- Therefore this phase proves that Linux `find_vma()` can traverse CXL-hosted Maple nodes under controlled conditions. It still does not prove constant-time VMA restore or persistent shared VMA leaf lifecycle across arbitrary VMA mutation.
