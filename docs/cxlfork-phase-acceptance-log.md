@@ -351,3 +351,60 @@ Known limits after Phase 10:
 - Dirty prefetch is implemented as restore-time local prefault of pages whose checkpointed PTE has D=1. It does not yet include an asynchronous background worker or device-driven prefetch pipeline.
 - The A-bit policy is meaningful for the current shared PTE leaf prototype, but full arbitrary-process A/D-bit semantics still depend on the supported checkpoint model and the real shared-leaf lifecycle limits documented in Phases 5 and 6.
 - The old stride behavior is removed from the paper-mechanism path; any future synthetic policy must be explicitly reported as synthetic and not used as evidence for the paper's A-bit hybrid policy.
+
+## Phase 11 accepted: per-call restore breakdown hygiene
+
+Date: 2026-07-13 Asia/Shanghai.
+
+Kernel commit: `b3c0fcdfaa5d` (`cxlfork: report restore breakdown per call`).
+
+Scope accepted:
+
+- Restore-time validation and mapping timings are now accumulated in a stack-local `cxlfork_restore_breakdown` for the current ioctl call.
+- Restore no longer resets or reuses shared descriptor fields for per-call values such as direct PTE install time, PTE-page validation time, VMA-tree validation time, private-rebase validation time, or global attach time.
+- Existing `pte_attach_ns/pages` are retained as legacy aliases but now mirror the explicitly named `pte_image_reconstruct_ns/pages`.
+- Added explicit restore output fields:
+  - `pte_image_reconstruct_ns/pages`
+  - `shared_leaf_attach_ns/pages`
+  - `dirty_prefault_ns/pages`
+- `direct_pte_install_ns/pages` now report the current restore call's direct PTE work only. They include shared-leaf PMD install and fallback PFN remap work, rather than reading a mutable shared descriptor accumulator.
+- Hybrid dirty prefault reports current-call dirty-prefault time and pages through the restore output.
+- The selftest now verifies restore breakdown relationships:
+  - readonly and MoW have direct install coverage for all restored pages;
+  - readonly and MoW expose nonzero shared-leaf attach coverage when the shared-leaf path is used;
+  - MoW reports PTE-image reconstruction pages and the legacy alias matches the new field;
+  - MoA reports zero direct/shared/reconstruct pages for its fault-driven local-copy path;
+  - hybrid reports exactly one dirty-prefault page in the controlled hot/cold/dirty test.
+
+Hard evidence from clean VM validation:
+
+- The shared backend was reset with `rm -f /dev/shm/cxl_mem` before the acceptance run.
+- VM1 readonly restore reported:
+  `direct_pages=1024 shared_leaf_pages=512 reconstruct_pages=0 verify=ok`.
+- VM1 MoW restore reported:
+  `direct_pages=1024 shared_leaf_pages=512 reconstruct_pages=1024 verify=ok`.
+- VM1 MoA restore reported:
+  `direct_pages=0 shared_leaf_pages=0 reconstruct_pages=0 verify=ok`.
+- VM1 hybrid restore reported:
+  `dirty_prefault_pages=1 verify=ok`.
+- These outputs show that the measured paths are no longer collapsed into a single ambiguous attach counter and that unsupported/not-taken paths report zero instead of inherited shared descriptor values.
+
+Regression validation:
+
+- Kernel `bzImage` build passed.
+- UAPI headers were refreshed from the O= build tree and cxlfork selftest rebuilt successfully.
+- VM0, VM1 and localfork each passed ABI 9/9.
+- VM1 readonly, MoW and MoA restore passed with Phase 7 CXL VMA lookup evidence and Phase 11 breakdown checks.
+- Phase 10 hybrid A/D-bit restore passed with dirty-prefault breakdown evidence.
+- failure tests passed.
+- lifecycle tests passed.
+- conflict test passed with `errno=17 guard=ok verify=ok`.
+- 124 MiB prepare succeeded; 125 MiB prepare returned `ENOSPC`.
+- Strict dmesg check on VM0/VM1/localfork was clean: no `BUG`, `WARNING`, `Oops`, `Call Trace`, cxlfork debug logs, cxlfork mmap/remap diagnostics, bad page map, bad pagetable, general protection fault, page fault, or `non-zero pgtables` warning.
+
+Known limits after Phase 11:
+
+- This phase fixes per-call accounting hygiene and naming for the current ioctl output. It does not add kernel tracepoints yet.
+- `pte_attach_ns/pages` remain in the legacy UAPI as compatibility aliases. New analysis should use `pte_image_reconstruct_ns/pages` for software reconstruction and `shared_leaf_attach_ns/pages` for real shared-leaf PMD installation.
+- Fault-time `faults`, `shared_map_pages`, `local_copy_pages`, and `leaf_copy_pages` remain descriptor-level lifecycle counters. They are not claimed as per-restore-call fields.
+- Dirty-prefault accounting covers restore-time prefault of checkpointed D=1 pages. Fault-driven later local copies are still accounted by existing lifecycle counters, not by this restore-call field.
