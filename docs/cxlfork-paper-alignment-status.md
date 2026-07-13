@@ -186,3 +186,18 @@
   原型的功能前提；结论不自动外推到尚未测试的真实 CXL 设备。
 - UAPI 现以 `include/uapi/linux/cxlfork.h` 为唯一来源；删除已漂移的
   sample 副本，selftest 与 benchmark 均使用 `headers_install` 结果。
+
+## 最终收口阶段 1：packed lifecycle 与 V2 context（2026-07-13）
+
+- kernel 提交为 `68e2f0c6e`、`8f1ad4220`、`fe9523d5d`。
+- state 与 reader count 合并为同一个跨 VM CAS word；release 只能获取
+  `READY,0`，reader 只能原子增加 `READY,n`。
+- 每次 restore 只有一个独立 context/slot reader。关闭控制 fd 后，VMA、
+  fault、reader 和 per-call stats 仍由各自 kref 保持，最后一个 VMA 关闭
+  后才释放 reader。
+- V2 prepare 返回 generation；V2 resume/release 强制携带 generation；同
+  key 重新 prepare 后，旧 generation 的 resume/release 均返回 `ESTALE`。
+- V2 ABI 11/11、fd-close-with-live-VMA、call-stats reopen query、旧
+  readonly/MoW/MoA/lifecycle、跨 VM litmus 和 dmesg 门禁均通过。
+- `REAL_SHARED_VMA_LEAF` capability 已取消；现有 VMA 机制继续准确报告为
+  image-driven reconstruction。

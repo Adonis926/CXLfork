@@ -615,3 +615,38 @@ Kernel commit: `ea3f5ef6f` (`cxlfork: verify cross-vm shared memory ordering`).
 This validates the current QEMU/KVM shared-file backend as a functional basis
 for the next lifecycle CAS stage. It does not generalize the result to an
 untested CXL device or provide crash-recovery guarantees.
+
+## Final-closeout Stage 1 accepted: packed lifecycle and V2 restore context
+
+Date: 2026-07-13 Asia/Shanghai.
+
+Kernel commits:
+
+- `68e2f0c6e` (`cxlfork: pack slot state and readers into one atomic word`)
+- `8f1ad4220` (`cxlfork: keep restore context alive with mapped vmas`)
+- `fe9523d5d` (`cxlfork: add generation-aware v2 lifecycle api`)
+
+Acceptance evidence:
+
+- Slot state and reader count now share one CAS word. Reader acquire can only
+  increment `READY,n`; release can only claim `READY,0`, closing the previous
+  cross-VM check/increment race.
+- Every resume owns one restore context and one slot reader regardless of VMA
+  count. File, VMA, registry, query, and fault paths hold independent krefs.
+- Closing `/dev/cxlfork` while restored VMAs remained live was tested: both
+  regions faulted successfully afterwards, another control fd queried the same
+  restore ID, inspect reported exactly one reader, and release returned
+  `EBUSY` until the last VMA disappeared.
+- Added strict-size V2 prepare/resume/release/call-stats operations. Prepare
+  returns generation; resume and release require it. Reusing the same key
+  advanced generation from 1 to 2, and old-generation resume/release both
+  returned `ESTALE`.
+- ABI positive/negative tests passed 11/11 on VM0, VM1, and localfork. They
+  cover short/oversized structures, wrong versions, nonzero header/tail
+  reserved fields, and the removal of the false real-shared-VMA capability.
+- Legacy readonly, MoW, MoA and lifecycle tests remained green. The Stage 0
+  litmus gate was rerun, and strict dmesg checks were clean on all three VMs.
+
+Known boundary: failed multi-region restore rollback is intentionally the next
+stage. The V2 context fixes object lifetime but does not by itself make mapping
+creation transactional.
