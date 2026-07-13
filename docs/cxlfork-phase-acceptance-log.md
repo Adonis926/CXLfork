@@ -297,3 +297,57 @@ Known limits after Phase 9:
 - Only regular files are supported. Sockets, pipes, epoll, eventfd, timerfd, anon_inode and device fds are explicitly unsupported for strict fd capture.
 - Descriptor flags such as close-on-exec are not yet separately serialized; the accepted test covers file status flags and offset.
 - Namespace restore is still identity/path recording plus cwd/root application, not namespace recreation.
+
+## Phase 10 accepted: checkpointed A/D-bit hybrid tiering
+
+Date: 2026-07-13 Asia/Shanghai.
+
+Kernel commit: `f44e8a87d684` (`cxlfork: drive hybrid tiering from checkpointed pte bits`).
+
+Scope accepted:
+
+- Added `CXLFORK_CAP_A_BIT_HYBRID` for the tested A/D-bit based hybrid policy.
+- Added `CXLFORK_PTE_MARK_V2`, a test-only v2 ioctl that can set/clear accessed and dirty bits on the caller's own PTEs under `mmap_write_lock()`.
+- `INSPECT_V2` now reports the checkpointed `orig_pte` and marks it with `CXLFORK_INSPECT_F_ORIG_PTE_VALID`.
+- Hybrid restore no longer uses synthetic stride-based hot-page selection.
+- The hybrid fault path now makes local-copy decisions from the checkpointed PTE image: write faults, checkpointed accessed pages, and checkpointed dirty pages take the local-copy path.
+- Dirty pages are prefaulted into local anonymous pages during hybrid restore, so the dirty-prefetch decision is based on checkpointed D bits rather than runtime stride.
+- The selftest now creates a three-page hot/cold/dirty matrix, manipulates A/D bits through `PTE_MARK_V2`, checkpoints the resulting PTE image, and verifies restore behavior through `INSPECT_V2` and PFN transitions.
+- The fd/global descriptor corruption investigation was resolved during this phase: the observed all-zero descriptor came from running prepare on `localfork`, which intentionally has no NVDIMM/CXL backend. In the correct CXL VM environment, fdglobal prepare/restore passes. State capture was still hardened by constructing task/mm/thread/global/fd state locally before copying it into the CXL descriptor.
+
+Hard evidence from clean VM validation:
+
+- The shared backend was reset with `rm -f /dev/shm/cxl_mem` before the acceptance run.
+- VM0 prepared the hybrid checkpoint:
+  `hybrid-prepare key=81003 pages=3 verify=ok`.
+- VM1 restored the hybrid checkpoint:
+  `hybrid-restore key=81003 hot_orig=8000000105710827 cold_orig=800000010ac21807 dirty_orig=800000010ad2b847 hot_pfn=1079508 cold_pfn=5096449 dirty_pfn=1063771 verify=ok`.
+- The restore output proves:
+  - the hot page carried the checkpointed accessed bit;
+  - the cold page did not carry the checkpointed accessed bit and stayed on the shared CXL PFN path;
+  - the dirty page carried the checkpointed dirty bit and was already local before user access.
+- Same-VM fd/global validation also passed after the descriptor investigation:
+  `fdglobal-restore key=81002 policy=readonly fd=7 pos=11 flags=append cwd=/tmp umask=027 sigusr1=blocked verify=ok`,
+  and the same check passed for MoW and MoA.
+
+Regression validation:
+
+- Kernel `bzImage` build passed.
+- UAPI headers were refreshed from the O= build tree and cxlfork selftest rebuilt successfully.
+- VM0, VM1 and localfork each passed ABI 9/9.
+- VM1 readonly, MoW and MoA restore passed with Phase 7 CXL VMA lookup evidence.
+- Phase 8 thread-context resume still passed for readonly, MoW and MoA.
+- Phase 9 fd/global restore still passed for readonly, MoW and MoA in the same-VM filesystem-identity environment.
+- failure tests passed.
+- lifecycle tests passed.
+- conflict test passed with `errno=17 guard=ok verify=ok`.
+- 124 MiB prepare succeeded with `pages=31744` and `image_bytes=133443584`; 125 MiB prepare returned `ENOSPC`.
+- Strict dmesg check on VM0/VM1/localfork was clean: no `BUG`, `WARNING`, `Oops`, `Call Trace`, cxlfork debug logs, cxlfork mmap/remap diagnostics, bad page map, bad pagetable, general protection fault, page fault, or `non-zero pgtables` warning.
+
+Known limits after Phase 10:
+
+- The accepted mechanism uses checkpointed PTE A/D bits as the policy source. It does not prove CXL hardware latency, bandwidth, NUMA-distance, cache-line, or dirty-prefetch performance benefits.
+- `CXLFORK_PTE_MARK_V2` is a controlled test hook for constructing deterministic A/D-bit inputs; it is not a production migration API.
+- Dirty prefetch is implemented as restore-time local prefault of pages whose checkpointed PTE has D=1. It does not yet include an asynchronous background worker or device-driven prefetch pipeline.
+- The A-bit policy is meaningful for the current shared PTE leaf prototype, but full arbitrary-process A/D-bit semantics still depend on the supported checkpoint model and the real shared-leaf lifecycle limits documented in Phases 5 and 6.
+- The old stride behavior is removed from the paper-mechanism path; any future synthetic policy must be explicitly reported as synthetic and not used as evidence for the paper's A-bit hybrid policy.
