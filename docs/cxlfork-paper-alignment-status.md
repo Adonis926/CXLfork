@@ -266,3 +266,14 @@ Hybrid A/D policy 通过：A=1 页面走本地复制，A=0 页面保持共享，
 普通文件/global state 在同一 VM/同一 root filesystem 子集通过；跨 VM 使用
 独立 qcow2 root 时，checkpointed `/tmp` inode 不存在并返回 `ENOENT`，因此
 本轮不宣称跨 root filesystem 的 global-state restore。
+
+## 阶段 6：并发、scaling 与 fault 回归（2026-07-13）
+
+同一 checkpoint 上并发启动 4 个 restore holder，观测到 3 个 reader 同时
+存在（第 4 个因固定测试地址冲突而被拒绝）；active release 返回 `EBUSY`，
+所有 VMA 退出后 reader_count 回到 0，最终 release 成功。阶段 4 的 30 次
+统计和 4/64/192 MiB scaling 在最终 selftest binary 上重跑通过。
+
+最终门禁包括 ABI 11/11、V2 lifecycle、20 次 rollback、MM fail-fast、跨 VM
+readonly/MoW/MoA、Hybrid A/D、A-bit feasibility、cooperative thread context、
+同 filesystem fd/global 子集、10×100,000 litmus 与三 VM dmesg/resource 检查。

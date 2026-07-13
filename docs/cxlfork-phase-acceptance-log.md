@@ -747,3 +747,20 @@ correctness subset and is not claimed to be transactionally reversible.
   returned `ENOENT` when the checkpointed `/tmp` inode was absent; this is
   recorded as an environment/root-filesystem identity limitation, not as a
   cross-VM global-state claim.
+
+## Final closeout Stage 6: concurrency, scaling and fault regression (2026-07-13)
+
+- Four concurrent legacy restore holders were launched in VM1 against one
+  checkpoint. Three readers were observed concurrently (the fourth process was
+  rejected by the fixed test address); active release returned `EBUSY`, and
+  reader count returned to zero after all VMAs exited. A final release succeeded.
+- The 30-sample fast/full statistics and 4/64/192 MiB scaling matrix from Stage 4
+  were rerun against the final selftest binary; no stale-generation, rollback,
+  MoW/MoA PFN, or checksum regression was observed.
+- Final gates passed: ABI 11/11, V2 lifecycle, 20 rollback injections, MM
+  fail-fast, cross-VM readonly/MoW/MoA, Hybrid A/D, A-bit feasibility,
+  cooperative thread context, same-filesystem fd/global subset, 10x100,000
+  cross-VM litmus, and three-VM dmesg/resource checks.
+- Generated selftest binaries and temporary logs are excluded from git; the
+  authoritative source/build state is the final remote branch and the acceptance
+  measurements are recorded above rather than presented as hardware P99 claims.
