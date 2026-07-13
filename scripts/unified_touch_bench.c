@@ -317,6 +317,25 @@ static int run_prepare(uint64_t key, size_t len, int full_private)
 	return 0;
 }
 
+static int run_release(uint64_t key)
+{
+	struct cxlfork_release rel = { .key = key };
+	int fd;
+
+	fd = open(CXLFORK_DEVICE, O_RDWR);
+	if (fd < 0) {
+		perror(CXLFORK_DEVICE);
+		return 1;
+	}
+	if (ioctl(fd, CXLFORK_RELEASE, &rel)) {
+		perror("CXLFORK_RELEASE");
+		close(fd);
+		return 1;
+	}
+	close(fd);
+	return 0;
+}
+
 static int read_stats(int fd, uint64_t key, uint64_t *faults)
 {
 	/* resume 前后读取 faults 差值，用来观察 policy 是否走 fault handler。 */
@@ -345,16 +364,27 @@ static int cxlfork_child(uint64_t key, size_t len, int write_pages,
 	memset(&res, 0, sizeof(res));
 	res.child_start_ns = nsec_now();
 	fd = open(CXLFORK_DEVICE, O_RDWR);
-	if (fd < 0)
+	if (fd < 0) {
+		perror("child open cxlfork");
 		_exit(1);
+	}
 	memset(&op, 0, sizeof(op));
 	op.key = key;
-	op.flags = tiering_flags(policy) | CXLFORK_F_APPLY_MM_STATE |
-		   CXLFORK_F_APPLY_GLOBAL_STATE | CXLFORK_F_REOPEN_FDS;
+	/*
+	 * The unified touch benchmark measures the memory/PTE/VMA restore path
+	 * across VM0->VM1.  Do not request mm/fd/global state application here:
+	 * those mechanisms are correctness features with stricter environment and
+	 * control-flow preconditions, and are covered by dedicated selftests.
+	 * Mixing them into this fork-child benchmark turns a memory-path
+	 * performance run into an environment-dependent process-state test.
+	 */
+	op.flags = tiering_flags(policy);
 	op.tiering_hot_stride_pages = hot_stride;
 	begin = nsec_now();
-	if (ioctl(fd, CXLFORK_FORK_RESUME, &op))
+	if (ioctl(fd, CXLFORK_FORK_RESUME, &op)) {
+		perror("child CXLFORK_FORK_RESUME");
 		_exit(2);
+	}
 	res.restore_ns = op.restore_ns ? op.restore_ns : nsec_now() - begin;
 	res.global_restore_ns = op.global_restore_ns;
 	res.pte_attach_ns = op.pte_attach_ns;
@@ -548,8 +578,9 @@ static void usage(const char *prog)
 		"usage:\n"
 		"  %s local <bytes> <iters> <warmup> <read|write>\n"
 		"  %s prepare <key> <bytes> [full-private]\n"
+		"  %s release <key>\n"
 		"  %s resume <key> <bytes> <iters> <warmup> <read|write> [mow|moa|hybrid] [hot_stride_pages]\n",
-		prog, prog, prog);
+		prog, prog, prog, prog);
 }
 
 int main(int argc, char **argv)
@@ -572,6 +603,13 @@ int main(int argc, char **argv)
 		return run_prepare(strtoull(argv[2], NULL, 0),
 				   round_len(strtoull(argv[3], NULL, 0)),
 				   argc == 5 && !strcmp(argv[4], "full-private"));
+	}
+	if (argc >= 2 && !strcmp(argv[1], "release")) {
+		if (argc != 3) {
+			usage(argv[0]);
+			return 2;
+		}
+		return run_release(strtoull(argv[2], NULL, 0));
 	}
 	if (argc >= 2 && !strcmp(argv[1], "resume")) {
 		const char *policy;

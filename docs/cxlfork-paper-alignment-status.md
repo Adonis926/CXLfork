@@ -139,3 +139,36 @@
 - prepare 只有在全部对象构建、checksum、用户态回填成功后才发布 READY；失败路径清空 descriptor 和 extent bitmap。
 - 4 MiB、192 MiB、512 MiB ENOSPC、failure、lifecycle、conflict、ABI、fdglobal、hybrid 和 threadctx 回归均通过，dmesg fatal 检查 clean。
 - 仍保留的真实性边界：key placement 仍是 `key % max_slots`，每个 key 仍占用固定 512 MiB slot；当前完成的是 per-slot extent bitmap 与动态 object manifest，不是全局可变大小 extent allocator。fd/region 的 legacy ioctl 输出容量仍受 UAPI 数组上限约束，更多条目需要新的 v2 prepare/restore 用户态缓冲 API。
+
+## 阶段 13 最终状态冻结（2026-07-13）
+
+- kernel 最终提交为 `a21d196dd`，主仓库最终提交将记录该 gitlink。
+- 最终 correctness suite 通过，日志位于远端 `/tmp/cxlfork_phase13_correctness.log`，结尾为 `PHASE13_CORRECTNESS_OK`。
+- 最终性能/分解矩阵通过，CSV 位于远端 `/tmp/cxlfork_phase13_perf.csv`；CSV 为 45 列、24 行数据，覆盖 4 MiB/64 MiB/192 MiB、read/write、MoW/MoA/Hybrid，并包含 LocalFork baseline。
+- 最终 dmesg 检查 clean：VM0/VM1/localfork 在 correctness 和 performance 之后均未见 kernel BUG/Oops/Call Trace、cxlfork mmap/remap 诊断、bad page map/bad pagetable/general protection、buffer overflow 或 `non-zero pgtables`。
+
+### 最终真实性矩阵
+
+| 机制/论文点 | 最终状态 | 说明 |
+|---|---|---|
+| 受限一致 checkpoint | 部分实现/已验证 | 单线程、协作式静止、私有匿名 4 KiB VMA；PTE/PFN 复制后复核；unsupported 路径明确失败。 |
+| 跨 VM slot 生命周期 | 已实现/已验证 | 固定 slot、generation、reader_count、READY/RELEASING 状态机；active release 返回 `EBUSY`。 |
+| Restore 地址无冲突语义 | 已实现/已验证 | 使用 `MAP_FIXED_NOREPLACE`，冲突返回 `EEXIST`，guard mapping 不被破坏。 |
+| MoW/MoA 数据页语义 | 已实现/已验证 | MoW 写后切本地 PFN，checkpoint/sibling checksum 不变；MoA 首次访问复制本地页。 |
+| 真实 shared PTE leaf attach | 原型实现/已验证 | 对 PMD 对齐整段 readonly/MoW region，目标 PMD 指向 CXL PTE leaf，CPU page walker 使用该 leaf。 |
+| shared PTE leaf CoW | 原型实现/已验证 | MoW 写 fault materialize leaf 到本地页表页，再由 core-MM 完成数据页 COW；并非所有 PTE mutation 入口都覆盖。 |
+| VMA image | 已实现/已验证 | CXL 中有 VMA image/tree，并可验证 lookup evidence。 |
+| 真实 Maple Tree/VMA leaf attach | 未实现/门槛阻塞 | Linux Maple Tree 节点保存本机 kernel 指针/RCU/slab 生命周期，不能安全直接指向 CXL offset/phys。 |
+| Thread context resume | 受控原型/已验证 | 专用 trampoline 测试能从保存 IP/SP 继续；不是 arbitrary process continuation。 |
+| FULL_PRIVATE_STATE | 未实现 | 仍不宣称完整 task/mm/object graph 恢复。 |
+| fd/global state | 子集实现/已验证 | 普通文件 fd、cwd/root/umask/signal mask 等在同 filesystem identity 环境下验证；特殊 fd/namespace 不支持。 |
+| A/D-bit hybrid | 已实现/已验证 | 基于 checkpointed PTE A/D bits；dirty pages restore-time prefault；性能收益不代表真实硬件。 |
+| Restore breakdown | 已实现/已验证 | per-call breakdown，不再复用共享累计字段；unsupported/not-taken 路径输出 0/NA 语义清楚。 |
+| 容量/动态布局 | 部分实现/已验证 | 512 MiB fixed slots、preflight sizing、out-of-line tables、per-slot extent bitmap；不是全局可变 extent allocator。 |
+| 真实 CXL 硬件性能 | 未验证/环境不支持 | 当前 QEMU shared backend 只能用于功能和趋势，不用于硬件绝对性能结论。 |
+
+### 最终可声明范围
+
+可以声明：在当前 QEMU shared-backend 环境中，CXLfork 已在受限单线程私有匿名模型上实现并验证一致 checkpoint、可靠固定 slot 生命周期、MoW/MoA 数据页语义、真实 shared PTE leaf attach 原型、MoW leaf materialization、A/D-bit hybrid 原型、fd/global 子集、thread-context trampoline、per-call breakdown 和 per-slot 动态布局 manifest。
+
+不能声明：完整复现论文 Figure 5 的 VMA/Maple Tree leaf attach、完整 arbitrary-process private-state graph、完整 namespace/global state、全局可变 CXL extent allocator、所有 Linux PTE mutation 入口的 leaf CoW 覆盖，或真实 CXL 硬件性能。

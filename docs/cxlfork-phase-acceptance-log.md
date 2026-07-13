@@ -502,3 +502,86 @@ Known limits after this Phase 12 work:
 - fd table capacity remains the legacy UAPI maximum of 32 descriptors. Supporting more fd entries without changing the legacy ioctl command requires a new versioned prepare/restore API with out-of-line userspace buffers.
 - Region output in legacy prepare/restore remains bounded by the legacy UAPI array. Internal table allocation is now manifest-driven, but the current supported model still caps regions at the legacy limit.
 - The extent bitmap tracks allocation correctness and cleanup for the current fixed-slot protocol. It is not yet a fragmentation-aware global allocator for multiple variable-size checkpoint objects.
+
+## Phase 13 accepted: final regression and status freeze
+
+Date: 2026-07-13 Asia/Shanghai.
+
+Kernel commits added for Phase 13:
+
+- `a21d196dd` (`cxlfork: resync sample uapi header`)
+
+Main-repo support fixes added for Phase 13:
+
+- `scripts/unified_touch_bench.c` no longer requests mm/fd/global state application in the cross-VM memory-path benchmark. Those mechanisms are correctness features with stricter environment/control-flow preconditions and remain covered by dedicated selftests.
+- `scripts/unified_touch_bench.c` gained a `release <key>` subcommand.
+- `scripts/21-benchmark-unified-touch.sh` releases each CXLfork key after its prepare/resume measurement so the strict `key % max_slots` slot protocol does not collide during longer matrices.
+- `samples/cxlfork/cxlfork_uapi.h` was resynchronized with the current kernel UAPI so standalone benchmark ioctl numbers match the kernel after the Phase 11/12 structure growth.
+
+Final correctness validation:
+
+- Kernel `bzImage` build passed from the committed tree.
+- `headers_install` passed.
+- `tools/testing/selftests/cxlfork` rebuilt successfully.
+- The shared backend was reset with `rm -f /dev/shm/cxl_mem` before the final correctness run.
+- VM0, VM1, and localfork each passed ABI 9/9.
+- VM1 restored 4 MiB, 64 MiB, and 192 MiB checkpoints with readonly, MoW, and MoA policies; all returned `verify=ok`.
+- Conflict tests passed for readonly, MoW, and MoA with `errno=17 guard=ok verify=ok`.
+- Unsupported/failure tests passed.
+- Lifecycle tests passed.
+- Explicit cross-VM active-reader release test passed: VM0 observed `readers=2` while VM1 held a restore mapping, VM0 release returned `EBUSY`, and release succeeded after the holder exited.
+- fd/global restore passed for readonly, MoW, and MoA in the same-VM filesystem-identity environment.
+- Hybrid A/D-bit restore passed with `dirty_prefault_pages=1 verify=ok`.
+- Thread-context resume passed for readonly, MoW, and MoA.
+- 512 MiB prepare returned `ENOSPC` as expected and did not publish a READY object.
+- Final correctness log ended with `PHASE13_CORRECTNESS_OK`.
+
+Final performance/breakdown matrix:
+
+- Performance CSV path on the remote host: `/tmp/cxlfork_phase13_perf.csv`.
+- A copy was also written to `results/cxlfork-phase13-perf.csv`, but `results/` is ignored by the repository and was not committed.
+- CSV shape was validated: 45 columns, 24 data rows.
+- Matrix dimensions:
+  - sizes: 4 MiB, 64 MiB, 192 MiB;
+  - modes: read, write;
+  - CXLfork policies: MoW, MoA, Hybrid;
+  - LocalFork baseline rows for each size/mode;
+  - `ITERS=2`, `WARMUP=1`.
+- Representative read-path outputs:
+  - 4 MiB MoW: `prepare_ns=10234783`, `restore_ns=38348`, `direct_pte_install_pages=1024`, `touch_ns=27954`.
+  - 64 MiB MoW: `prepare_ns=162194590`, `restore_ns=242138`, `direct_pte_install_pages=16384`, `touch_ns=462880`.
+  - 192 MiB MoW: `prepare_ns=482178990`, `restore_ns=693388`, `direct_pte_install_pages=49152`, `touch_ns=1243183`.
+  - 192 MiB MoA read: `restore_ns=647941`, `faults=49152`, `touch_ns=90536179`.
+  - 192 MiB Hybrid read: `restore_ns=59334217`, `faults=0`, `touch_ns=1534542`.
+- The performance data is valid for functional breakdown and trend analysis in the QEMU shared-backend environment. It is not a real CXL hardware latency/bandwidth result.
+
+Final dmesg validation:
+
+- After the correctness suite and after the performance matrix, VM0/VM1/localfork strict dmesg checks were clean.
+- No kernel BUG, Oops, Call Trace, cxlfork debug logs, cxlfork mmap/remap diagnostics, bad page map, bad pagetable, general protection fault, detected buffer overflow, or `non-zero pgtables` warning was observed.
+
+Final accepted support model:
+
+- x86-64, 4 KiB pages.
+- Single-threaded cooperative checkpoint.
+- Private anonymous VMA memory model.
+- Unsupported VMA/process-state paths fail explicitly instead of silently producing READY objects.
+- Reliable fixed-slot lifecycle with generation and reader counts.
+- Real shared CXL PTE-leaf attach for aligned readonly/MoW paths.
+- Shared-leaf materialization on MoW write fault, followed by data-page COW.
+- VMA image reconstruction plus CXL-backed lookup evidence, but not real Maple Tree attach.
+- Thread-context resume prototype for the controlled test trampoline.
+- fd/global restore for the tested ordinary-file/same-filesystem subset.
+- A/D-bit hybrid policy based on checkpointed PTE bits.
+- Per-call restore breakdown hygiene.
+- Dynamic per-slot object manifest and extent bitmap within fixed 512 MiB slots.
+
+Final non-goals / remaining limits:
+
+- No real CXL fabric latency, bandwidth, NUMA distance, cache-line, or device-pressure claim.
+- No arbitrary multi-threaded or non-cooperative process checkpoint.
+- No complete FULL_PRIVATE_STATE arbitrary process restore.
+- No real Maple Tree/VMA leaf attach; the accepted VMA mechanism remains image-driven reconstruction.
+- No global variable-size allocator across the whole CXL window; Phase 12 implemented per-slot extent bitmap and manifest under the fixed `key % max_slots` protocol.
+- No complete coverage of every Linux PTE mutation path beyond the validated shared-leaf write-fault/materialization path.
+- No sockets, pipes, epoll, timerfd, or arbitrary namespace restore.
