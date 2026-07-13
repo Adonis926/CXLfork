@@ -16,6 +16,9 @@ SMP=${SMP:-16}
 VM0_PORT=${VM0_PORT:-2200}
 VM1_PORT=${VM1_PORT:-2201}
 LOCAL_PORT=${LOCAL_PORT:-2202}
+VM1_CONTROL_HOST=${VM1_CONTROL_HOST:-172.17.0.1}
+VM1_CONTROL_PORT=${VM1_CONTROL_PORT:-2301}
+VM1_GUEST_CONTROL_PORT=${VM1_GUEST_CONTROL_PORT:-7000}
 
 mkdir -p "$WS/logs" "$WS/pids" "$WS/sockets"
 
@@ -125,6 +128,7 @@ start_vm1() {
 	require_file "$WS/images/vm1.qcow2"
 	require_file "$WS/cloudinit/vm1-seed.iso"
 	require_port_free vm1 "$VM1_PORT"
+	require_port_free vm1-control "$VM1_CONTROL_PORT"
 	ensure_cxl_file
 	"$QEMU" \
 		-name vm1 \
@@ -138,7 +142,7 @@ start_vm1() {
 		-drive file="$WS/cloudinit/vm1-seed.iso",media=cdrom,if=virtio,format=raw,readonly=on \
 		-kernel "$KERNEL" \
 		-append "root=/dev/vda1 rw console=ttyS0 earlyprintk=ttyS0 nokaslr net.ifnames=0 cxlfork.cxl_phys=$CXL_PHYS cxlfork.cxl_size=$CXL_SIZE" \
-		-netdev user,id=mgmt,hostfwd=tcp::"$VM1_PORT"-:22 \
+		-netdev user,id=mgmt,hostfwd=tcp::"$VM1_PORT"-:22,hostfwd=tcp:"$VM1_CONTROL_HOST":"$VM1_CONTROL_PORT"-:"$VM1_GUEST_CONTROL_PORT" \
 		-device virtio-net-pci,netdev=mgmt,mac=52:54:00:12:00:02 \
 		-netdev socket,id=data,mcast=230.0.0.1:1234 \
 		-device virtio-net-pci,netdev=data,mac=52:54:00:12:01:02 \
@@ -147,7 +151,7 @@ start_vm1() {
 		-pidfile "$pidfile" \
 		-display none \
 		-daemonize
-	echo "started vm1 pid=$(cat "$pidfile") ssh=localhost:$VM1_PORT"
+	echo "started vm1 pid=$(cat "$pidfile") ssh=localhost:$VM1_PORT control=$VM1_CONTROL_HOST:$VM1_CONTROL_PORT"
 }
 
 start_localfork() {
