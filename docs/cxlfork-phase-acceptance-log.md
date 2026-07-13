@@ -452,3 +452,53 @@ Required next work for full Phase 12:
 - Replace fixed slots with an extent bitmap/state machine that can atomically reserve and release multiple extents per key.
 - Add recovery tests for allocation failure after partial reservation, multi-key fragmentation, and concurrent large checkpoints.
 - Only after those changes should Phase 12 be marked fully accepted.
+
+## Phase 12 accepted: dynamic table manifest and slot extent bitmap
+
+Date: 2026-07-13 Asia/Shanghai.
+
+Kernel commits:
+
+- `bee44d2b2` (`cxlfork: move checkpoint tables out of slot descriptor`)
+- `204697878` (`cxlfork: size checkpoint tables from preflight manifest`)
+- `8e08aa198` (`cxlfork: track slot allocations with an extent bitmap`)
+
+Scope accepted:
+
+- `struct cxlfork_desc` no longer embeds the large fd/region/PTE arrays. It stores CXL offsets, entry counts, and byte sizes for out-of-line fd, region, and PTE tables.
+- Checkpoint preflight now returns a sizing manifest. Region and PTE tables are allocated from actual preflight counts instead of always reserving the maximum table size.
+- `INSPECT_V2` reports table offsets, entry counts, table byte sizes, page-data offset/bytes, extent size/count, bitmap word count, and allocated extent count.
+- Prepare publishes READY only after all CXL objects are built, checksummed, copied back to userspace, and validated. Failed prepare paths with `ready=0` clear the descriptor and preserve only the generation counter.
+- Legacy prepare/restore output loops are bounded by the legacy UAPI array capacity, so future larger internal region counts cannot overflow the userspace structure.
+- Each fixed 512 MiB slot now has a 4 KiB extent bitmap stored in the descriptor. Descriptor area, fd/region/PTE tables, page data, leaf PTE image, PT page image/tree, VMA image, state image, and private rebase image allocations are marked in the bitmap. Duplicate or out-of-range extent allocation returns an error instead of silently overlapping.
+- Release and failed prepare clear the descriptor, including the extent bitmap, so subsequent checkpoint attempts start from a clean allocation manifest.
+- The selftest validates the manifest after prepare: table offsets must be nonzero, region/PTE entry counts must match the observed checkpoint, page-data bytes must equal total pages, extent size must equal page size, and allocated extents must cover the published image size.
+
+Hard evidence from clean VM validation:
+
+- Kernel `bzImage` build passed; UAPI headers were refreshed and cxlfork selftest rebuilt successfully.
+- VM0 prepared a 4 MiB checkpoint with dynamic PTE table sizing:
+  `prepare key=1221 slot=3 regions=2 pages=1024 ... image_bytes=4354048 region_table_bytes=4096 pte_table_bytes=32768 extents=1063 verify=ok`.
+- VM1 restored that checkpoint with readonly, MoW, and MoA policies; all returned `verify=ok`.
+- VM0 prepared a 192 MiB checkpoint exceeding the old 128 MiB slot limit:
+  `prepare key=1222 slot=4 regions=2 pages=49152 ... image_bytes=204951552 region_table_bytes=4096 pte_table_bytes=1572864 extents=50037 verify=ok`.
+- VM1 restored the 192 MiB checkpoint readonly with `direct_pages=49152 shared_leaf_pages=24576 reconstruct_pages=0 verify=ok`.
+- A 512 MiB checkpoint failed with `FORK_PREPARE: No space left on device`, and no READY object was published.
+- failure tests passed.
+- lifecycle tests passed.
+- conflict test passed with `errno=17 guard=ok verify=ok`.
+- ABI tests passed 9/9.
+- fd/global restore passed in the same-VM filesystem identity environment:
+  `fdglobal-restore key=1234 policy=readonly ... verify=ok`.
+- Hybrid A/D-bit restore passed:
+  `hybrid-restore key=1235 ... dirty_prefault_pages=1 verify=ok`.
+- Thread-context resume still passed:
+  `threadctx-resume verify=ok`.
+- Strict dmesg check on VM0/VM1/localfork was clean: no kernel BUG, Oops, Call Trace, cxlfork debug logs, cxlfork mmap/remap diagnostics, bad page map, bad pagetable, general protection fault, detected buffer overflow, or `non-zero pgtables` warning.
+
+Known limits after this Phase 12 work:
+
+- Key placement is still `key % max_slots` and each key still owns one fixed 512 MiB slot. This work adds a real per-slot extent bitmap and dynamic object manifest, but it does not yet replace fixed slots with a global variable-size allocator.
+- fd table capacity remains the legacy UAPI maximum of 32 descriptors. Supporting more fd entries without changing the legacy ioctl command requires a new versioned prepare/restore API with out-of-line userspace buffers.
+- Region output in legacy prepare/restore remains bounded by the legacy UAPI array. Internal table allocation is now manifest-driven, but the current supported model still caps regions at the legacy limit.
+- The extent bitmap tracks allocation correctness and cleanup for the current fixed-slot protocol. It is not yet a fragmentation-aware global allocator for multiple variable-size checkpoint objects.

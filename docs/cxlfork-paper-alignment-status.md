@@ -128,3 +128,14 @@
 - 因此不能把 CXL offset、CXL physical address 或当前自定义 VMA image 直接写入 `mm->mm_mt.ma_root`。这样会让 Maple Tree 把 CXL 内容当成本机 slab 节点解引用，并可能在释放时交给 `maple_node_cache`。
 - 安全实现需要 Maple Tree 级别扩展：新增可识别的 CXL node 类型或 accessor、所有 lookup 路径的 CXL offset 转换、所有 mutation 路径的 materialize、RCU/free 特判，以及 VMA entry 指针/对象图策略。
 - 阶段 7 在可行性门槛处阻塞；当前 VMA 机制仍只能称为 image-driven reconstruction，不能宣称真实 Maple Tree attach 或 VMA constant-time restore。
+
+## 阶段 12 更新（2026-07-13）
+
+- kernel 已推进到 `8e08aa198`。
+- 阶段 12 不再停留在 bounded large-slot gate：descriptor 内嵌大数组已移出，fd/region/PTE 表在 CXL slot 内通过 offset/entries/bytes manifest 描述。
+- checkpoint preflight 现在产生 sizing manifest；region/PTE 表按实际 region/page 数分配，不再为每个 checkpoint 固定预留最大 PTE 表。
+- `INSPECT_V2` 现在暴露 table offsets、entries、bytes、page-data offset/bytes，以及 extent bitmap 的 extent size/count/allocated extents。
+- 每个固定 512 MiB slot 增加 4 KiB extent bitmap，覆盖 descriptor、动态表、page data、PTE/VMA/state/rebase images；重复或越界分配返回错误。
+- prepare 只有在全部对象构建、checksum、用户态回填成功后才发布 READY；失败路径清空 descriptor 和 extent bitmap。
+- 4 MiB、192 MiB、512 MiB ENOSPC、failure、lifecycle、conflict、ABI、fdglobal、hybrid 和 threadctx 回归均通过，dmesg fatal 检查 clean。
+- 仍保留的真实性边界：key placement 仍是 `key % max_slots`，每个 key 仍占用固定 512 MiB slot；当前完成的是 per-slot extent bitmap 与动态 object manifest，不是全局可变大小 extent allocator。fd/region 的 legacy ioctl 输出容量仍受 UAPI 数组上限约束，更多条目需要新的 v2 prepare/restore 用户态缓冲 API。
