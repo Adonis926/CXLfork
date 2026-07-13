@@ -13,7 +13,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "cxlfork_uapi.h"
+#include <linux/cxlfork.h>
 
 /*
  * unified_touch_bench 是最小闭环 microbenchmark：
@@ -304,15 +304,19 @@ static int run_prepare(uint64_t key, size_t len, int full_private)
 	       " pages=%" PRIu64 " anon_pages=%" PRIu64
 	       " clean_file_pages=%" PRIu64 " dirty_file_pages=%" PRIu64
 	       " checksum=%" PRIu64 " verify=ok\n",
-	       key, len, op.checkpoint_ns, op.pte_image_build_ns,
-	       op.pte_image_pages, op.pt_page_image_build_ns,
-	       op.pt_page_image_pages, op.pt_page_image_entries,
-	       op.vma_tree_build_ns, op.vma_tree_pages, op.vma_tree_nodes,
-	       op.state_image_build_ns,
-	       op.state_image_pages, op.private_rebase_ns,
-	       op.private_rebase_entries, op.private_rebase_pages,
-	       op.global_detach_ns, op.total_pages, op.anon_pages,
-	       op.clean_file_pages, op.dirty_file_pages, checksum);
+	       key, len, (uint64_t)op.checkpoint_ns,
+	       (uint64_t)op.pte_image_build_ns, (uint64_t)op.pte_image_pages,
+	       (uint64_t)op.pt_page_image_build_ns,
+	       (uint64_t)op.pt_page_image_pages,
+	       (uint64_t)op.pt_page_image_entries,
+	       (uint64_t)op.vma_tree_build_ns, (uint64_t)op.vma_tree_pages,
+	       (uint64_t)op.vma_tree_nodes, (uint64_t)op.state_image_build_ns,
+	       (uint64_t)op.state_image_pages, (uint64_t)op.private_rebase_ns,
+	       (uint64_t)op.private_rebase_entries,
+	       (uint64_t)op.private_rebase_pages,
+	       (uint64_t)op.global_detach_ns, (uint64_t)op.total_pages,
+	       (uint64_t)op.anon_pages, (uint64_t)op.clean_file_pages,
+	       (uint64_t)op.dirty_file_pages, checksum);
 	close(fd);
 	return 0;
 }

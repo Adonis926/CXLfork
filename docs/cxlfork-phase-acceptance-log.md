@@ -585,3 +585,33 @@ Final non-goals / remaining limits:
 - No global variable-size allocator across the whole CXL window; Phase 12 implemented per-slot extent bitmap and manifest under the fixed `key % max_slots` protocol.
 - No complete coverage of every Linux PTE mutation path beyond the validated shared-leaf write-fault/materialization path.
 - No sockets, pipes, epoll, timerfd, or arbitrary namespace restore.
+
+## Final-closeout Stage 0 accepted: cross-VM memory-ordering prerequisite
+
+Date: 2026-07-13 Asia/Shanghai.
+
+Kernel commit: `ea3f5ef6f` (`cxlfork: verify cross-vm shared memory ordering`).
+
+- Added a privileged, selftest-only litmus interface in the CXL superblock
+  reserve. It uses the same `ioremap_cache()` mapping and CPU primitives as the
+  production slot protocol, without relying on the existing slot mutex or
+  reader implementation.
+- VM0 and VM1 concurrently exercised shared 64-bit CAS/RMW, release/acquire
+  message publication with an eight-word payload, and bidirectional token
+  ping-pong.
+- The hard gate passed 10 independent rounds with 100,000 iterations per test:
+  zero lost increments, zero stale/torn payload observations, zero ordering
+  errors, and zero timeouts. The complete log is
+  `/tmp/cxlfork_stage0_litmus.log` on the remote host.
+- `CONFIG_CXLFORK_SELFTEST` gates the test ioctl and every call requires
+  `CAP_SYS_ADMIN`; it is not exposed as a production mechanism capability.
+- `include/uapi/linux/cxlfork.h` is now the single authoritative UAPI header.
+  The stale sample copy was removed, and both kselftest and the main benchmark
+  build from the `headers_install` output.
+- Kernel `bzImage`, `headers_install`, cxlfork kselftests, the standalone
+  benchmark with `-Werror`, ABI 9/9 on VM0/VM1/localfork, and strict dmesg
+  checks all passed.
+
+This validates the current QEMU/KVM shared-file backend as a functional basis
+for the next lifecycle CAS stage. It does not generalize the result to an
+untested CXL device or provide crash-recovery guarantees.

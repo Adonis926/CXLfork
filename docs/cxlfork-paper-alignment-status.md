@@ -172,3 +172,17 @@
 可以声明：在当前 QEMU shared-backend 环境中，CXLfork 已在受限单线程私有匿名模型上实现并验证一致 checkpoint、可靠固定 slot 生命周期、MoW/MoA 数据页语义、真实 shared PTE leaf attach 原型、MoW leaf materialization、A/D-bit hybrid 原型、fd/global 子集、thread-context trampoline、per-call breakdown 和 per-slot 动态布局 manifest。
 
 不能声明：完整复现论文 Figure 5 的 VMA/Maple Tree leaf attach、完整 arbitrary-process private-state graph、完整 namespace/global state、全局可变 CXL extent allocator、所有 Linux PTE mutation 入口的 leaf CoW 覆盖，或真实 CXL 硬件性能。
+
+## 最终收口阶段 0：跨 VM 内存序硬门禁（2026-07-13）
+
+- kernel 提交为 `ea3f5ef6f`。
+- 在生产 slot 协议之外的预留 CXL 页上，使用相同的 `ioremap_cache()`
+  映射验证跨 VM CAS/RMW、release/acquire payload publication 和双向
+  cache-coherent ping-pong。
+- VM0/VM1 共运行 10 轮，每项每轮 100,000 次迭代；lost update、payload
+  mismatch、ordering error 和 timeout 均为 0。日志位于远端
+  `/tmp/cxlfork_stage0_litmus.log`。
+- 该结果使当前 QEMU/KVM shared-file backend 满足后续 lifecycle CAS
+  原型的功能前提；结论不自动外推到尚未测试的真实 CXL 设备。
+- UAPI 现以 `include/uapi/linux/cxlfork.h` 为唯一来源；删除已漂移的
+  sample 副本，selftest 与 benchmark 均使用 `headers_install` 结果。

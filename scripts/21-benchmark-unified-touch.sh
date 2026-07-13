@@ -58,8 +58,8 @@ field() {
 }
 
 build() {
-	# 用户态 benchmark 依赖 samples/cxlfork/cxlfork_uapi.h，因此必须传 CXLFORK_KERNEL。
-	gcc -O2 -Wall -Wextra -I"$CXLFORK_KERNEL/samples/cxlfork" \
+	# 只使用 headers_install 生成的权威 UAPI，避免 sample header 漂移。
+	gcc -O2 -Wall -Wextra -I"$KBUILD/usr/include" \
 		-o "$WS/scripts/unified_touch_bench" "$WS/scripts/unified_touch_bench.c"
 	if [[ "$CXLFORK_BUILTIN" != "1" ]]; then
 		make -C "$KBUILD" M="$CXLFORK_KERNEL/drivers/cxlfork" CONFIG_CXLFORK=m \
