@@ -650,3 +650,39 @@ Acceptance evidence:
 Known boundary: failed multi-region restore rollback is intentionally the next
 stage. The V2 context fixes object lifetime but does not by itself make mapping
 creation transactional.
+
+## Final-closeout Stage 2 accepted: transactional restore and MM fail-fast
+
+Date: 2026-07-13 Asia/Shanghai.
+
+Kernel commit: `18f804f4f` (`cxlfork: make anonymous restore transactional`).
+
+- V2 restore now preflights every target range with strict no-conflict
+  semantics and tracks each successfully created VMA. Any later mapping,
+  descriptor recheck, userspace-copy, or thread-activation error unmaps the
+  completed regions in reverse order before dropping the restore context.
+- Direct-map and COW helpers also unwind the current VMA on every internal
+  allocation, lookup, or PTE-install error. There is no destructive
+  `MAP_FIXED` fallback.
+- A privileged selftest-only flag injects `EIO` after the first of two regions.
+  The test proved both addresses were reusable with `MAP_FIXED_NOREPLACE`, the
+  slot reader returned to zero, and generation-aware release succeeded. Twenty
+  consecutive injected failures passed without residue.
+- Restored VMAs now reject `mprotect`, `mremap`, and VMA splits (including
+  partial `munmap`) through real VMA/core-MM hooks. `fork` is rejected before
+  mm duplication, preserving `EOPNOTSUPP` rather than translating it to
+  `ENOMEM`. Both fast and slow GUP paths reject ranges intersecting a restored
+  VMA; privileged probes covered read, write, long-term, and write+long-term
+  pins.
+- `QUERY_CAPS_V2` reports an explicit tested `mm_failfast_mask`, shared-leaf
+  alignment, and memory restore policy mask. Paths not represented by tested
+  hooks remain unsupported rather than being advertised as fail-fast.
+- Kernel `bzImage` #79, `headers_install`, and selftests built successfully.
+  ABI tests passed 11/11 on VM0, VM1, and localfork. V2/legacy lifecycle,
+  unsupported checkpoint tests, 4 MiB cross-VM readonly/MoW/MoA, and the
+  10-round 100,000-iteration cross-VM ordering gate all passed.
+- Warning-level dmesg checks on all three VMs were clean after the suite.
+
+Scope boundary: rollback is complete for the default anonymous-memory data
+path. Optional global/thread state application is still an independent
+correctness subset and is not claimed to be transactionally reversible.

@@ -201,3 +201,22 @@
   readonly/MoW/MoA/lifecycle、跨 VM litmus 和 dmesg 门禁均通过。
 - `REAL_SHARED_VMA_LEAF` capability 已取消；现有 VMA 机制继续准确报告为
   image-driven reconstruction。
+
+## 最终收口阶段 2：事务 restore 与 MM fail-fast（2026-07-13）
+
+- kernel 提交为 `18f804f4f`。
+- 默认匿名内存 restore 已事务化：所有目标区间先做无冲突检查，逐 region
+  记录成功映射；后续任何错误均按逆序 `vm_munmap()`，随后才释放 context
+  和 slot reader。
+- 两 region 故障注入在第一段成功后返回 `EIO`，验证两段地址均可重新以
+  `MAP_FIXED_NOREPLACE` 建立映射、reader_count 回到 0、release 成功；连续
+  20 次重复通过。
+- 已通过真实 hook 验证并在 `mm_failfast_mask` 中声明的操作只有：
+  `mprotect`、`fork`、read/write/long-term GUP、partial `munmap` 和
+  `mremap`。它们均返回 `EOPNOTSUPP`，完整 VMA unmap/进程退出仍受支持。
+- 新内核 #79 在 VM0/VM1/localfork 通过 ABI 11/11；V2/legacy lifecycle、
+  failure tests、跨 VM readonly/MoW/MoA、10×100,000 litmus 和三 VM dmesg
+  门禁全部通过。
+- 当前 rollback 声明只覆盖默认匿名内存数据路径；可选 global/thread
+  restore 是独立 correctness 子集，尚不声明具有可逆事务语义，也不进入
+  默认论文数据面 benchmark。
