@@ -726,3 +726,24 @@ correctness subset and is not claimed to be transactionally reversible.
   Fast validation is nearly page-count independent, while complete restore still
   scales with mapping and validation work; no constant-time full-restore claim is
   made.
+
+## Final closeout Stage 5: A-bit feasibility and independent state subsets (2026-07-13)
+
+- The independent A-bit gate uses a PMD-aligned 2 MiB shared-leaf mapping. The
+  source PTE A/D bits are cleared before checkpoint; the target reads one byte
+  and inspect compares the CXL leaf PTE before/after. On the current QEMU/KVM
+  shared backend the observation passed: `before_pte=...ca05` and
+  `after_pte=...ca25`, i.e. the hardware page walker set `_PAGE_ACCESSED` in
+  the shared CXL leaf. This is a feasibility result for this backend, not a
+  general claim about every EPT/CXL device.
+- The test reports `status=unsupported` (and does not fail the core suite) if
+  KVM/EPT/TLB prevents a stable A-bit observation. The shared-leaf, leaf-CoW,
+  lifecycle and fast-path gates do not depend on this optional observation.
+- The checkpointed-A/D Hybrid test passed (`hot` A=1 copied locally, `cold`
+  A=0 remained shared, dirty page restore-time prefaulted locally).
+- Cooperative thread-context activation passed on the saved-IP trampoline.
+  Ordinary-file/global-state restore passed as a same-filesystem correctness
+  subset on one VM. Cross-VM restore against independent qcow2 roots correctly
+  returned `ENOENT` when the checkpointed `/tmp` inode was absent; this is
+  recorded as an environment/root-filesystem identity limitation, not as a
+  cross-VM global-state claim.

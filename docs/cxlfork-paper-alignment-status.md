@@ -250,3 +250,19 @@ litmus 与三 VM dmesg 均通过。MoW 4 MiB 矩阵明确报告
 212.23/203/269/27.4 和 5735.73/5084/5552/2384.42。4/64/192 MiB 单次
 fast/full total 约为 19.9us/5.94ms、23.5us/94.4ms、41.4us/283.3ms；仅能
 说明默认 fast validation 近似与页数无关，不能宣称完整 restore 为常数时间。
+
+## 阶段 5：A-bit feasibility 与独立状态子集（2026-07-13）
+
+新增 selftest-only `abit-prepare/abit-restore` gate：在 PMD 对齐的 2 MiB
+shared-leaf 映射上，checkpoint 前清除源 PTE A/D，目标读取一字节后通过
+`INSPECT_V2.current_pte` 观察 CXL leaf。当前 QEMU/KVM backend 实测
+`before ...ca05` 到 `after ...ca25`，证明 `_PAGE_ACCESSED` 由硬件 walker
+写回共享 CXL leaf。若后续 KVM/EPT/TLB 环境不能稳定观察，该测试输出
+`status=unsupported`，不阻塞 shared-leaf、leaf CoW、slot lifecycle 或
+fast-path 收口，也不外推为所有真实 CXL 设备的硬件结论。
+
+Hybrid A/D policy 通过：A=1 页面走本地复制，A=0 页面保持共享，D=1 页面
+在 restore 时 prefault 本地。cooperative thread-context trampoline 通过。
+普通文件/global state 在同一 VM/同一 root filesystem 子集通过；跨 VM 使用
+独立 qcow2 root 时，checkpointed `/tmp` inode 不存在并返回 `ENOENT`，因此
+本轮不宣称跨 root filesystem 的 global-state restore。
