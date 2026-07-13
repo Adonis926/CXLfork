@@ -686,3 +686,43 @@ Kernel commit: `18f804f4f` (`cxlfork: make anonymous restore transactional`).
 Scope boundary: rollback is complete for the default anonymous-memory data
 path. Optional global/thread state application is still an independent
 correctness subset and is not claimed to be transactionally reversible.
+
+## Final closeout Stage 3: restore fast path and validation separation (2026-07-13)
+
+- Kernel commit: `cbb0d33a5`.
+- V2 default resume performs only O(1) manifest/bounds admission. Legacy resume
+  and explicit `CXLFORK_F_VALIDATE_FULL` perform full VMA/PT/state/rebase image
+  validation and checksum recomputation. `path_mask` and `validated_ptes` are
+  returned per call.
+- The CXL VMA image is read-only lookup evidence; it is not written into
+  Linux `mm_mt`. The temporary Maple probe was removed so image reconstruction
+  cannot be mistaken for Maple attach.
+- `cxlfork_find_shared_leaf_pfn()` now walks the fixed-depth page-table image
+  instead of linearly scanning leaf metadata. 1,024, 16,384 and 49,152-page
+  fast/full tests passed with `validated_ptes=0` for fast and all pages for full.
+
+## Final closeout Stage 4: per-call breakdown and fault measurement (2026-07-13)
+
+- Prepare V2 records lock/lifecycle, VMA preflight, PTE walk, GUP, page copy,
+  PTE recheck, metadata, checksum seal and publish. Restore records manifest/
+  full validation, VMA creation, upper page-table allocation, shared-leaf attach,
+  fallback reconstruction, dirty prefault, global restore, rollback and residual
+  `other_ns`.
+- Fault contexts record actual fault dispatch and CXL-to-local copy time. Core-MM
+  data CoW and leaf materialization lack complete hooks, so their validity bits
+  remain clear and callers must interpret those fields as NA, not zero. Context
+  stats remain queryable after `/dev/cxlfork` is closed.
+- Shared-leaf and fallback accounting no longer overlap: the 4 MiB cross-VM
+  matrix reports readonly `shared_leaf_pages=512,direct_pages=512` and MoW
+  `shared_leaf_pages=512,reconstruct_pages=512`; MoA copies locally on first use.
+- ABI 11/11, fast/full path, rollback, MM fail-fast, V2 lifecycle,
+  readonly/MoW/MoA, 10x100,000 litmus, and three-VM dmesg checks passed.
+- With 30 samples, only mean/P50/P95/stddev are reported (no P99): 4 MiB
+  `fast_total_ns` 11661.6/11228/14724/1579.27 and `full_total_ns`
+  5934280.53/5929577/5965923/16705.67; validation-only fast/full were
+  212.23/203/269/27.4 and 5735.73/5084/5552/2384.42.
+- Single-point scaling showed fast/full total restore of about
+  `19.9us/5.94ms`, `23.5us/94.4ms`, and `41.4us/283.3ms` for 4/64/192 MiB.
+  Fast validation is nearly page-count independent, while complete restore still
+  scales with mapping and validation work; no constant-time full-restore claim is
+  made.

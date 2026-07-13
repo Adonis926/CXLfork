@@ -220,3 +220,33 @@
 - 当前 rollback 声明只覆盖默认匿名内存数据路径；可选 global/thread
   restore 是独立 correctness 子集，尚不声明具有可逆事务语义，也不进入
   默认论文数据面 benchmark。
+
+## 阶段 3/4：fast path 与 measurement 收口（2026-07-13）
+
+阶段 3 kernel commit 为 `cbb0d33a5`。V2 默认 restore 只执行 O(1)
+manifest/bounds admission；legacy 或 `CXLFORK_F_VALIDATE_FULL` 才执行完整
+VMA/PT/state/rebase validation 和 checksum。`path_mask`、`validated_ptes` 和
+新的统计 validity mask 按单次调用返回。CXL VMA image 仅用于只读 lookup
+证据，未接入 `mm_mt`；临时 Maple probe 已删除。
+
+阶段 4 将 prepare/restore/fault breakdown 对齐到实际执行区间：
+
+- prepare：lock/lifecycle、VMA preflight、PTE walk、GUP、页面复制、PTE
+  recheck、metadata、checksum seal、publish；
+- restore：manifest/full validation、VMA create、upper page-table allocation、
+  shared leaf attach、fallback reconstruction、dirty prefault、global restore、
+  rollback 和 residual `other_ns`；
+- fault：实际 dispatch 和 CXL-to-local copy。core-MM data CoW 与 leaf
+  materialization 尚无完整 hook，validity bit 保持清零，表示 NA 而不是 0。
+
+阶段 4 验收：ABI 11/11、fast/full path、20 次 transactional rollback、MM
+fail-fast、fd-close 后 context/fault stats、跨 VM readonly/MoW/MoA、10×100,000
+litmus 与三 VM dmesg 均通过。MoW 4 MiB 矩阵明确报告
+`shared_leaf_pages=512` 与 `reconstruct_pages=512`，不重复统计。
+
+30 次 4 MiB 样本只报告 mean/P50/P95/stddev，不报告 P99：
+`fast_total_ns` 11661.6/11228/14724/1579.27，`full_total_ns`
+5934280.53/5929577/5965923/16705.67；validation-only fast/full 为
+212.23/203/269/27.4 和 5735.73/5084/5552/2384.42。4/64/192 MiB 单次
+fast/full total 约为 19.9us/5.94ms、23.5us/94.4ms、41.4us/283.3ms；仅能
+说明默认 fast validation 近似与页数无关，不能宣称完整 restore 为常数时间。
