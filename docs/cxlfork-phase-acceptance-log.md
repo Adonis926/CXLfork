@@ -408,3 +408,47 @@ Known limits after Phase 11:
 - `pte_attach_ns/pages` remain in the legacy UAPI as compatibility aliases. New analysis should use `pte_image_reconstruct_ns/pages` for software reconstruction and `shared_leaf_attach_ns/pages` for real shared-leaf PMD installation.
 - Fault-time `faults`, `shared_map_pages`, `local_copy_pages`, and `leaf_copy_pages` remain descriptor-level lifecycle counters. They are not claimed as per-restore-call fields.
 - Dirty-prefault accounting covers restore-time prefault of checkpointed D=1 pages. Fault-driven later local copies are still accounted by existing lifecycle counters, not by this restore-call field.
+
+## Phase 12 partial gate: bounded large-slot sizing
+
+Date: 2026-07-13 Asia/Shanghai.
+
+Kernel commit: `cdc7b37222ac` (`cxlfork: add bounded large-slot sizing gate`).
+
+Scope completed:
+
+- Increased the bounded checkpoint slot size from 128 MiB to 512 MiB.
+- Reduced the fixed slot count to 7 so the configured 4 GiB QEMU shared backend and `cxlfork.cxl_size=0xfb000000` still contain every advertised slot.
+- Increased the internal PTE capacity from 32,768 to 131,072 pages and the shared PTE-page image cap from 1,024 to 4,096 entries.
+- Changed the per-slot payload start from a hard-coded `slot + 2 MiB` to `slot + PAGE_ALIGN(sizeof(struct cxlfork_desc))`, so larger descriptor metadata cannot overlap page payload.
+- Added a checkpoint preflight sizing pass under `mmap_read_lock()` before copying pages into CXL. Unsupported VMA types, region/PTE count overflow, metadata upper-bound overflow, and slot capacity overflow now fail before the checkpoint becomes READY.
+- Updated lifecycle selftest collision logic to use `QUERY_CAPS_V2.max_slots` instead of assuming 16 slots.
+
+Hard evidence from clean VM validation:
+
+- The shared backend was reset with `rm -f /dev/shm/cxl_mem` before validation.
+- VM0 prepared a 192 MiB checkpoint, exceeding the old 128 MiB nominal slot limit:
+  `prepare key=84021 slot=0 regions=2 pages=49152 checksum=5305240480154190723 image_bytes=207552512 verify=ok`.
+- VM1 restored that checkpoint readonly:
+  `restore key=84021 policy=readonly regions=2 pages=49152 checksum=5305240480154190723 ... direct_pages=49152 shared_leaf_pages=24576 reconstruct_pages=0 verify=ok`.
+- VM0 attempted a 512 MiB checkpoint and failed before publishing a READY object:
+  `FORK_PREPARE: No space left on device`,
+  followed by `512MiB prepare failed as expected`.
+- failure tests passed after a clean backend reset.
+- lifecycle tests passed with `max_slots`-aware same-slot collision logic.
+- conflict test passed with `errno=17 guard=ok verify=ok`.
+- Strict dmesg check on VM0/VM1/localfork was clean: no `BUG`, `WARNING`, `Oops`, `Call Trace`, cxlfork debug logs, cxlfork mmap/remap diagnostics, bad page map, bad pagetable, general protection fault, page fault, or `non-zero pgtables` warning.
+
+Why this is not full Phase 12 acceptance:
+
+- This is a bounded large-slot and preflight-sizing gate, not the final dynamic extent allocator.
+- The implementation still uses key-to-slot placement and fixed-size slots; it does not yet allocate arbitrary extents from a shared bitmap.
+- The legacy ioctl ABI encodes structure size in the ioctl number. Directly increasing UAPI `CXLFORK_MAX_FDS` or `CXLFORK_MAX_REGIONS` made the ioctl command too large to remain a compile-time switch case constant. Therefore dynamic fd/region tables require a new versioned v2 prepare/restore API with out-of-line tables instead of larger legacy arrays.
+- Region and fd output limits therefore remain at the legacy UAPI bounds for now. The completed part expands page/PTE capacity and prevents silent partial publication, but it does not remove every fixed table.
+
+Required next work for full Phase 12:
+
+- Add versioned v2 prepare/restore structures whose fixed header points to out-of-line CXL tables for regions, PTEs and fds.
+- Replace fixed slots with an extent bitmap/state machine that can atomically reserve and release multiple extents per key.
+- Add recovery tests for allocation failure after partial reservation, multi-key fragmentation, and concurrent large checkpoints.
+- Only after those changes should Phase 12 be marked fully accepted.
