@@ -79,6 +79,9 @@ ensure_cxl_file() {
 	if pid_alive "$WS/pids/vm0.pid" || pid_alive "$WS/pids/vm1.pid"; then
 		return
 	fi
+	# truncate 到相同大小不会清除旧文件中的 slot 内容。先删除再创建，
+	# 保证一次全新 VM 启动不会继承上一轮 checkpoint/generation。
+	rm -f "$CXL_FILE"
 	require_shm_space
 	truncate -s "$CXL_BACKEND_SIZE" "$CXL_FILE"
 }
