@@ -937,8 +937,11 @@ done
 
 ```bash
 cd /home/adonis/cxlfork/remote-backup-20260713/control-plane/final-benchmark
-sha256sum -c SHA256SUMS
+awk '{name=$2; sub(/^.*\//, "", name); print $1 "  " name}' \
+  SHA256SUMS | sha256sum -c -
 ```
+
+2026-07-13 的历史清单保存了远端绝对路径，所以本地校验需要先转换为文件名。当前 benchmark 脚本已经使用相对路径生成新清单。
 
 ## 23. 推荐的学习顺序
 

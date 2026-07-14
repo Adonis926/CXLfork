@@ -568,8 +568,11 @@ git -C cxlporter status --short
 
 ```bash
 cd /home/adonis/cxlfork/remote-backup-20260713/control-plane/final-benchmark
-sha256sum -c SHA256SUMS
+awk '{name=$2; sub(/^.*\//, "", name); print $1 "  " name}' \
+  SHA256SUMS | sha256sum -c -
 ```
+
+这份 2026-07-13 历史清单记录的是远端绝对路径，因此本地校验时先保留文件名。后续脚本已经改为生成可直接执行 `sha256sum -c SHA256SUMS` 的相对路径清单。
 
 ## 12. 已有结果应如何理解
 
