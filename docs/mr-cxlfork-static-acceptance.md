@@ -39,7 +39,7 @@ kernel defect.
 | 0. Branch and baseline freeze | complete | main `352a1fe`, MR `0172795` | clean branches created and pushed |
 | 1. V2 adapter and template publisher | complete | MR `2eef97d` | CXL/on-off builds pass; VM caps match; map/reduce 4 MiB publish and cross-VM checksum pass; unaligned and same-slot cases fail explicitly; dmesg clean |
 | 2. MR porter local lifecycles | complete | MR `8231ede` | persistent/localfork/local-prefork pass with 1 and 2 workers; WordCount output matches; dual-VM ivshmem smoke passes; no residual processes; dmesg clean |
-| 3. Serial CXLfork ghost restore | pending | | |
+| 3. Serial CXLfork ghost restore | complete | MR `aa58e8d` | four reducer tasks each restore in a new ghost; path mask 5, 1024 shared-leaf pages, zero fallback; stale generation fails; active release is EBUSY; final readers zero and release succeeds; dmesg clean |
 | 4. Static map/reduce placement | pending | | |
 | 5. Fixed concurrency | pending | | |
 | 6. Measurement and correctness closure | pending | | |
