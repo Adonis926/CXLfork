@@ -37,7 +37,7 @@ kernel defect.
 | Stage | Status | Revisions/artifacts | Acceptance |
 | --- | --- | --- | --- |
 | 0. Branch and baseline freeze | complete | main `352a1fe`, MR `0172795` | clean branches created and pushed |
-| 1. V2 adapter and template publisher | pending | | |
+| 1. V2 adapter and template publisher | complete | MR `2eef97d` | CXL/on-off builds pass; VM caps match; map/reduce 4 MiB publish and cross-VM checksum pass; unaligned and same-slot cases fail explicitly; dmesg clean |
 | 2. MR porter local lifecycles | pending | | |
 | 3. Serial CXLfork ghost restore | pending | | |
 | 4. Static map/reduce placement | pending | | |
