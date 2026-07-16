@@ -11,6 +11,12 @@ CXL_FILE=${CXL_FILE:-/dev/shm/cxl_mem}       # host 上共享给 VM0/VM1 的 CXL
 CXL_BACKEND_SIZE=${CXL_BACKEND_SIZE:-4G}     # QEMU memory-backend-file 大小。
 CXL_PHYS=${CXL_PHYS:-0x484000000}            # guest 内核 ioremap 的物理基址。
 CXL_SIZE=${CXL_SIZE:-0xfb000000}             # guest 内核看到的 CXL window 大小。
+# HydraRPC 文件模拟后端。一个 4 GiB host tmpfs 文件按 offset 划成两个
+# 2 GiB endpoint，并以两个 ivshmem BAR 同时映射到 VM0/VM1。
+HYDRA_SHM_FILE=${HYDRA_SHM_FILE:-/dev/shm/cxlmem}
+HYDRA_SHM_SIZE=${HYDRA_SHM_SIZE:-4G}
+HYDRA_ENDPOINT_SIZE=${HYDRA_ENDPOINT_SIZE:-2G}
+HYDRA_ENDPOINT1_OFFSET=${HYDRA_ENDPOINT1_OFFSET:-2G}
 MEM=${MEM:-16G}
 SMP=${SMP:-16}
 VM0_PORT=${VM0_PORT:-2200}
@@ -86,6 +92,35 @@ ensure_cxl_file() {
 	truncate -s "$CXL_BACKEND_SIZE" "$CXL_FILE"
 }
 
+ensure_hydra_file() {
+	# VM0 启动前重建一次；VM0/VM1 运行期间绝不截断共享文件。
+	if pid_alive "$WS/pids/vm0.pid" || pid_alive "$WS/pids/vm1.pid"; then
+		return
+	fi
+	local total endpoint offset avail
+	total=$(size_to_bytes "$HYDRA_SHM_SIZE")
+	endpoint=$(size_to_bytes "$HYDRA_ENDPOINT_SIZE")
+	offset=$(size_to_bytes "$HYDRA_ENDPOINT1_OFFSET")
+	if (( offset + endpoint > total )); then
+		echo "HydraRPC endpoint layout exceeds $HYDRA_SHM_SIZE" >&2
+		exit 1
+	fi
+	avail=$(df -B1 --output=avail "$(dirname "$HYDRA_SHM_FILE")" | tail -n 1 | tr -d ' ')
+	if [[ "$avail" -lt "$total" ]]; then
+		echo "not enough free space for $HYDRA_SHM_FILE: need=$HYDRA_SHM_SIZE avail=${avail}B" >&2
+		exit 1
+	fi
+	rm -f "$HYDRA_SHM_FILE"
+	truncate -s "$HYDRA_SHM_SIZE" "$HYDRA_SHM_FILE"
+}
+
+hydra_ivshmem_args=(
+	-object "memory-backend-file,id=hydra0,share=on,mem-path=$HYDRA_SHM_FILE,size=$HYDRA_ENDPOINT_SIZE,offset=0"
+	-device "ivshmem-plain,id=hydra-shm0,memdev=hydra0"
+	-object "memory-backend-file,id=hydra1,share=on,mem-path=$HYDRA_SHM_FILE,size=$HYDRA_ENDPOINT_SIZE,offset=$HYDRA_ENDPOINT1_OFFSET"
+	-device "ivshmem-plain,id=hydra-shm1,memdev=hydra1"
+)
+
 start_vm0() {
 	# VM0 是 checkpoint/prepare 端，挂载共享 CXL backend。
 	local pidfile=$WS/pids/vm0.pid
@@ -97,6 +132,7 @@ start_vm0() {
 	require_file "$WS/cloudinit/vm0-seed.iso"
 	require_port_free vm0 "$VM0_PORT"
 	ensure_cxl_file
+	ensure_hydra_file
 	"$QEMU" \
 		-name vm0 \
 		-machine q35,accel=kvm,nvdimm=on \
@@ -105,6 +141,7 @@ start_vm0() {
 		-m "$MEM",slots=1,maxmem=20G \
 		-object memory-backend-file,id=cxlmem,share=on,mem-path="$CXL_FILE",size="$CXL_BACKEND_SIZE" \
 		-device nvdimm,id=cxldev,memdev=cxlmem,label-size=16M \
+		"${hydra_ivshmem_args[@]}" \
 		-drive file="$WS/images/vm0.qcow2",if=virtio,cache=writeback,format=qcow2 \
 		-drive file="$WS/cloudinit/vm0-seed.iso",media=cdrom,if=virtio,format=raw,readonly=on \
 		-kernel "$KERNEL" \
@@ -118,7 +155,7 @@ start_vm0() {
 		-pidfile "$pidfile" \
 		-display none \
 		-daemonize
-	echo "started vm0 pid=$(cat "$pidfile") ssh=localhost:$VM0_PORT"
+	echo "started vm0 pid=$(cat "$pidfile") ssh=localhost:$VM0_PORT hydra=$HYDRA_SHM_FILE"
 }
 
 start_vm1() {
@@ -133,6 +170,7 @@ start_vm1() {
 	require_port_free vm1 "$VM1_PORT"
 	require_port_free vm1-control "$VM1_CONTROL_PORT"
 	ensure_cxl_file
+	ensure_hydra_file
 	"$QEMU" \
 		-name vm1 \
 		-machine q35,accel=kvm,nvdimm=on \
@@ -141,6 +179,7 @@ start_vm1() {
 		-m "$MEM",slots=1,maxmem=20G \
 		-object memory-backend-file,id=cxlmem,share=on,mem-path="$CXL_FILE",size="$CXL_BACKEND_SIZE" \
 		-device nvdimm,id=cxldev,memdev=cxlmem,label-size=16M \
+		"${hydra_ivshmem_args[@]}" \
 		-drive file="$WS/images/vm1.qcow2",if=virtio,cache=writeback,format=qcow2 \
 		-drive file="$WS/cloudinit/vm1-seed.iso",media=cdrom,if=virtio,format=raw,readonly=on \
 		-kernel "$KERNEL" \
@@ -154,7 +193,7 @@ start_vm1() {
 		-pidfile "$pidfile" \
 		-display none \
 		-daemonize
-	echo "started vm1 pid=$(cat "$pidfile") ssh=localhost:$VM1_PORT control=$VM1_CONTROL_HOST:$VM1_CONTROL_PORT"
+	echo "started vm1 pid=$(cat "$pidfile") ssh=localhost:$VM1_PORT control=$VM1_CONTROL_HOST:$VM1_CONTROL_PORT hydra=$HYDRA_SHM_FILE"
 }
 
 start_localfork() {
