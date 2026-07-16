@@ -42,7 +42,7 @@ kernel defect.
 | 3. Serial CXLfork ghost restore | complete | MR `aa58e8d` | four reducer tasks each restore in a new ghost; path mask 5, 1024 shared-leaf pages, zero fallback; stale generation fails; active release is EBUSY; final readers zero and release succeeds; dmesg clean |
 | 4. Static map/reduce placement | complete | MR `e41a516` | `role-static` sends all map work to VM0 and all reduce work to VM1; agent role checks reject a map-to-reducer mismatch; four reducer restores use shared-leaf path 5 with zero fallback; output, cleanup and guest dmesg pass |
 | 5. Fixed concurrency | complete | MR `349180f` | async porter submit/collect and batched master dispatch run four fixed ghosts concurrently; reader count reaches four; eight one-shot reducer PIDs use shared leaves with zero fallback; undersized shuffle connection configuration fails explicitly; output and dmesg pass |
-| 6. Measurement and correctness closure | pending | | |
+| 6. Measurement and correctness closure | complete | MR `debcb1b` | versioned task-result envelope, non-overlapping task sub-interval, standard static runner, raw/summary CSV and 30-sample four-mode matrix pass; active/stale/release regression and dmesg pass |
 | 7. Final 91 acceptance and 103 profile | pending | | |
 
 Each completed stage must build, run its success/boundary/failure tests, and
@@ -87,3 +87,37 @@ the next stage begins.
   at most one task per fixed worker and demultiplexes by task/partition ID.
 - Both build variants and both guest dmesg scans passed, with no residual
   `mr_hydra` process.
+
+## Stage 6 evidence
+
+- Final dataset: `/home/xtl/cxlfork/mr-static-results/stage6-30-final` on
+  10.0.16.91.  It contains four identical 30-sample experiments (plus five
+  warmups): `persistent`, `localfork`, `local-prefork`, and `cxlfork`.
+  `verify=all` passed for every measured sample.  Each mode includes
+  `runs.csv`, `tasks.csv`, `task_summary.csv`, result JSON/env and raw logs.
+- End-to-end mean/P50/P95/stddev in milliseconds were: persistent
+  361.367/361.000/371.000/5.642; localfork
+  365.067/365.000/378.000/7.728; local-prefork
+  365.667/366.500/378.000/7.494; and CXLfork
+  357.167/356.000/375.000/8.238.  These figures include SSH-launched agent
+  setup/teardown and the full MR/Hydra control path; they are not kernel-only
+  restore latency.
+- Across 120 measured CXLfork reducer tasks, mean task callback time was
+  12.888 ms, porter total 13.133 ms, restore ioctl wall time 44.759 us,
+  kernel-reported restore total 12.626 us, and ghost refill 69.745 us.  Every
+  task reported path mask 5, 1,024 shared-leaf pages, zero fallback pages and
+  a distinct one-shot PID for that task invocation.
+- The response begins with fixed-size `mr_task_result_v1` and is validated by
+  magic, size, version and zero reserved fields before master strips it from
+  the business payload.  `task_ns` measures only the application callback;
+  restore, template validation, reap and refill are separate sub-intervals,
+  while `porter_total_ns` is the outer inclusive interval.
+- The standard `scripts/run-bench.sh` accepts the fixed worker descriptor
+  `HOST,MASTER_PATH,AGENT_PATH,ROLE,LAUNCH,WORKERS`, produces raw per-call
+  `tasks.csv`, mean/P50/P95/stddev task summaries, and never reports P99 for
+  the 30-sample matrix.
+- Lifecycle regression `/tmp/mr-stage3-life-1578120` confirmed active release
+  returns `EBUSY`, stale generation fails the job without leaking a reader,
+  reader count returns to zero, and matched release succeeds.  Final template
+  generation 14 was also observed with zero readers and released.  Both guest
+  dmesg scans and residual-process checks passed.
