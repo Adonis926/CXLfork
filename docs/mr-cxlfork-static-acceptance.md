@@ -43,7 +43,7 @@ kernel defect.
 | 4. Static map/reduce placement | complete | MR `e41a516` | `role-static` sends all map work to VM0 and all reduce work to VM1; agent role checks reject a map-to-reducer mismatch; four reducer restores use shared-leaf path 5 with zero fallback; output, cleanup and guest dmesg pass |
 | 5. Fixed concurrency | complete | MR `349180f` | async porter submit/collect and batched master dispatch run four fixed ghosts concurrently; reader count reaches four; eight one-shot reducer PIDs use shared leaves with zero fallback; undersized shuffle connection configuration fails explicitly; output and dmesg pass |
 | 6. Measurement and correctness closure | complete | MR `debcb1b` | versioned task-result envelope, non-overlapping task sub-interval, standard static runner, raw/summary CSV and 30-sample four-mode matrix pass; active/stale/release regression and dmesg pass |
-| 7. Final 91 acceptance and 103 profile | complete | main `pending commit` | four-policy smoke, final caps/build/cleanliness/dmesg checks and local backup pass; safe non-overlapping real-DAX launcher profile is documented but deliberately not run on occupied 103 host |
+| 7. Final 91 acceptance and 103 profile | complete | main `3e81659` | four-policy smoke, final caps/build/cleanliness/dmesg checks and local backup pass; safe non-overlapping real-DAX launcher profile is documented but deliberately not run on occupied 103 host |
 
 Each completed stage must build, run its success/boundary/failure tests, and
 check both guest kernels for BUG/WARNING/Oops/bad-page-table signatures before
