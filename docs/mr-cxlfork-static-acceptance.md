@@ -43,7 +43,7 @@ kernel defect.
 | 4. Static map/reduce placement | complete | MR `e41a516` | `role-static` sends all map work to VM0 and all reduce work to VM1; agent role checks reject a map-to-reducer mismatch; four reducer restores use shared-leaf path 5 with zero fallback; output, cleanup and guest dmesg pass |
 | 5. Fixed concurrency | complete | MR `349180f` | async porter submit/collect and batched master dispatch run four fixed ghosts concurrently; reader count reaches four; eight one-shot reducer PIDs use shared leaves with zero fallback; undersized shuffle connection configuration fails explicitly; output and dmesg pass |
 | 6. Measurement and correctness closure | complete | MR `debcb1b` | versioned task-result envelope, non-overlapping task sub-interval, standard static runner, raw/summary CSV and 30-sample four-mode matrix pass; active/stale/release regression and dmesg pass |
-| 7. Final 91 acceptance and 103 profile | pending | | |
+| 7. Final 91 acceptance and 103 profile | complete | main `pending commit` | four-policy smoke, final caps/build/cleanliness/dmesg checks and local backup pass; safe non-overlapping real-DAX launcher profile is documented but deliberately not run on occupied 103 host |
 
 Each completed stage must build, run its success/boundary/failure tests, and
 check both guest kernels for BUG/WARNING/Oops/bad-page-table signatures before
@@ -121,3 +121,31 @@ the next stage begins.
   reader count returns to zero, and matched release succeeds.  Final template
   generation 14 was also observed with zero readers and released.  Both guest
   dmesg scans and residual-process checks passed.
+
+## Stage 7 evidence
+
+- Policy dataset: `/home/xtl/cxlfork/mr-static-results/stage7-policies`.
+  Readonly and MoW each used path mask 5 with 1,024 shared-leaf pages and zero
+  fallback.  MoA used path 17 and copied the one header page touched by fast
+  validation.  Hybrid used path 33; no page happened to be promoted by this
+  header-only smoke.  All four modes produced correct WordCount output and the
+  shared template released with zero readers.
+- Both final build variants pass.  VM0 and VM1 report identical ABI 2 caps
+  (`capabilities=31711`, 4 KiB page, 2 MiB shared-leaf alignment, seven 512 MiB
+  slots); the CXL-disabled build rejects caps with status 2 instead of claiming
+  support.
+- The launcher now supports a CXL backing offset and Hydra base offset, checks
+  range overlap, refuses automatic reset of non-regular backing objects, and
+  requires `BACKEND_RESET=none` when both planes share one real DAX device.
+  Default 91 layout validation and a proposed disjoint 103 layout pass; an
+  intentionally overlapping layout fails.  Default 91 values are unchanged.
+- `docs/mr-cxlfork-103-migration-profile.md` records the proposed first 8 GiB
+  layout and gated migration order.  It is explicitly unvalidated: 103 was not
+  contacted or modified because another group was using it.
+- Final revisions are MR `debcb1bda938f8a02021067d5cfa661896463d32` and kernel
+  `15ae46586aaff49c5f6b72271da8b5833899132a`; the kernel and legacy cxlporter
+  remained untouched.  MR/main/kernel/cxlporter worktrees were clean before
+  the final documentation commit.
+- Important code, diffs, acceptance documents, the complete 30-sample matrix,
+  and policy results are copied to the local jump-host backup directory
+  `/home/adonis/cxlfork/backups/mr-cxlfork-static-20260716`.

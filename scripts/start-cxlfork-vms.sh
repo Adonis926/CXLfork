@@ -9,14 +9,19 @@ QEMU=${QEMU:-qemu-system-x86_64}
 KERNEL=${KERNEL:-$WS/kernel/build-6.6.32/arch/x86/boot/bzImage}
 CXL_FILE=${CXL_FILE:-/dev/shm/cxl_mem}       # host 上共享给 VM0/VM1 的 CXL 后端文件。
 CXL_BACKEND_SIZE=${CXL_BACKEND_SIZE:-4G}     # QEMU memory-backend-file 大小。
+CXL_BACKEND_OFFSET=${CXL_BACKEND_OFFSET:-0}  # 在真实 DAX 设备中的保留区起点。
 CXL_PHYS=${CXL_PHYS:-0x484000000}            # guest 内核 ioremap 的物理基址。
 CXL_SIZE=${CXL_SIZE:-0xfb000000}             # guest 内核看到的 CXL window 大小。
 # HydraRPC 文件模拟后端。一个 4 GiB host tmpfs 文件按 offset 划成两个
 # 2 GiB endpoint，并以两个 ivshmem BAR 同时映射到 VM0/VM1。
 HYDRA_SHM_FILE=${HYDRA_SHM_FILE:-/dev/shm/cxlmem}
 HYDRA_SHM_SIZE=${HYDRA_SHM_SIZE:-4G}
+HYDRA_BACKEND_OFFSET=${HYDRA_BACKEND_OFFSET:-0}
 HYDRA_ENDPOINT_SIZE=${HYDRA_ENDPOINT_SIZE:-2G}
 HYDRA_ENDPOINT1_OFFSET=${HYDRA_ENDPOINT1_OFFSET:-2G}
+# auto 只会重建普通文件；真实 /dev/dax* 必须显式使用 none，启动脚本绝不
+# 删除、truncate 或清零设备节点。设备清零必须在 VM 停止后由管理员单独完成。
+BACKEND_RESET=${BACKEND_RESET:-auto}
 MEM=${MEM:-16G}
 SMP=${SMP:-16}
 VM0_PORT=${VM0_PORT:-2200}
@@ -85,6 +90,18 @@ ensure_cxl_file() {
 	if pid_alive "$WS/pids/vm0.pid" || pid_alive "$WS/pids/vm1.pid"; then
 		return
 	fi
+	if [[ "$BACKEND_RESET" == none ]]; then
+		require_file "$CXL_FILE"
+		return
+	fi
+	if [[ "$BACKEND_RESET" != auto ]]; then
+		echo "BACKEND_RESET must be auto or none" >&2
+		exit 2
+	fi
+	if [[ -e "$CXL_FILE" && ! -f "$CXL_FILE" ]]; then
+		echo "refusing to reset non-regular CXL backend $CXL_FILE; use BACKEND_RESET=none" >&2
+		exit 1
+	fi
 	# truncate 到相同大小不会清除旧文件中的 slot 内容。先删除再创建，
 	# 保证一次全新 VM 启动不会继承上一轮 checkpoint/generation。
 	rm -f "$CXL_FILE"
@@ -96,6 +113,18 @@ ensure_hydra_file() {
 	# VM0 启动前重建一次；VM0/VM1 运行期间绝不截断共享文件。
 	if pid_alive "$WS/pids/vm0.pid" || pid_alive "$WS/pids/vm1.pid"; then
 		return
+	fi
+	if [[ "$BACKEND_RESET" == none ]]; then
+		require_file "$HYDRA_SHM_FILE"
+		return
+	fi
+	if [[ "$BACKEND_RESET" != auto ]]; then
+		echo "BACKEND_RESET must be auto or none" >&2
+		exit 2
+	fi
+	if [[ -e "$HYDRA_SHM_FILE" && ! -f "$HYDRA_SHM_FILE" ]]; then
+		echo "refusing to reset non-regular Hydra backend $HYDRA_SHM_FILE; use BACKEND_RESET=none" >&2
+		exit 1
 	fi
 	local total endpoint offset avail
 	total=$(size_to_bytes "$HYDRA_SHM_SIZE")
@@ -114,10 +143,31 @@ ensure_hydra_file() {
 	truncate -s "$HYDRA_SHM_SIZE" "$HYDRA_SHM_FILE"
 }
 
+hydra_endpoint0_offset=$(size_to_bytes "$HYDRA_BACKEND_OFFSET")
+hydra_endpoint1_offset=$((hydra_endpoint0_offset + $(size_to_bytes "$HYDRA_ENDPOINT1_OFFSET")))
+
+validate_backend_layout() {
+	local cxl_begin cxl_end hydra_begin hydra_end
+	cxl_begin=$(size_to_bytes "$CXL_BACKEND_OFFSET")
+	cxl_end=$((cxl_begin + $(size_to_bytes "$CXL_BACKEND_SIZE")))
+	hydra_begin=$hydra_endpoint0_offset
+	hydra_end=$((hydra_endpoint1_offset + $(size_to_bytes "$HYDRA_ENDPOINT_SIZE")))
+	if [[ "$CXL_FILE" == "$HYDRA_SHM_FILE" && "$BACKEND_RESET" != none ]]; then
+		echo "a shared CXL/Hydra backing object requires BACKEND_RESET=none" >&2
+		exit 1
+	fi
+	if [[ "$CXL_FILE" == "$HYDRA_SHM_FILE" ]] &&
+	   (( cxl_begin < hydra_end && hydra_begin < cxl_end )); then
+		echo "CXLfork and HydraRPC backend ranges overlap in $CXL_FILE" >&2
+		echo "CXL=[$cxl_begin,$cxl_end) Hydra=[$hydra_begin,$hydra_end)" >&2
+		exit 1
+	fi
+}
+
 hydra_ivshmem_args=(
-	-object "memory-backend-file,id=hydra0,share=on,mem-path=$HYDRA_SHM_FILE,size=$HYDRA_ENDPOINT_SIZE,offset=0"
+	-object "memory-backend-file,id=hydra0,share=on,mem-path=$HYDRA_SHM_FILE,size=$HYDRA_ENDPOINT_SIZE,offset=$hydra_endpoint0_offset"
 	-device "ivshmem-plain,id=hydra-shm0,memdev=hydra0"
-	-object "memory-backend-file,id=hydra1,share=on,mem-path=$HYDRA_SHM_FILE,size=$HYDRA_ENDPOINT_SIZE,offset=$HYDRA_ENDPOINT1_OFFSET"
+	-object "memory-backend-file,id=hydra1,share=on,mem-path=$HYDRA_SHM_FILE,size=$HYDRA_ENDPOINT_SIZE,offset=$hydra_endpoint1_offset"
 	-device "ivshmem-plain,id=hydra-shm1,memdev=hydra1"
 )
 
@@ -139,7 +189,7 @@ start_vm0() {
 		-cpu host \
 		-smp "$SMP",sockets=1,cores="$SMP",threads=1 \
 		-m "$MEM",slots=1,maxmem=20G \
-		-object memory-backend-file,id=cxlmem,share=on,mem-path="$CXL_FILE",size="$CXL_BACKEND_SIZE" \
+		-object memory-backend-file,id=cxlmem,share=on,mem-path="$CXL_FILE",size="$CXL_BACKEND_SIZE",offset="$CXL_BACKEND_OFFSET" \
 		-device nvdimm,id=cxldev,memdev=cxlmem,label-size=16M \
 		"${hydra_ivshmem_args[@]}" \
 		-drive file="$WS/images/vm0.qcow2",if=virtio,cache=writeback,format=qcow2 \
@@ -177,7 +227,7 @@ start_vm1() {
 		-cpu host \
 		-smp "$SMP",sockets=1,cores="$SMP",threads=1 \
 		-m "$MEM",slots=1,maxmem=20G \
-		-object memory-backend-file,id=cxlmem,share=on,mem-path="$CXL_FILE",size="$CXL_BACKEND_SIZE" \
+		-object memory-backend-file,id=cxlmem,share=on,mem-path="$CXL_FILE",size="$CXL_BACKEND_SIZE",offset="$CXL_BACKEND_OFFSET" \
 		-device nvdimm,id=cxldev,memdev=cxlmem,label-size=16M \
 		"${hydra_ivshmem_args[@]}" \
 		-drive file="$WS/images/vm1.qcow2",if=virtio,cache=writeback,format=qcow2 \
@@ -229,7 +279,14 @@ start_localfork() {
 main() {
 	# 调试时推荐先 cxl，再 localfork，避免 all 一次启动三个 VM 时难以定位失败点。
 	require_file "$KERNEL"
+	validate_backend_layout
 	case "${1:-all}" in
+		check)
+			printf 'backend_layout_ok cxl=%s offset=%s size=%s hydra=%s offset=%s endpoint_size=%s endpoint1_offset=%s reset=%s\n' \
+				"$CXL_FILE" "$CXL_BACKEND_OFFSET" "$CXL_BACKEND_SIZE" \
+				"$HYDRA_SHM_FILE" "$HYDRA_BACKEND_OFFSET" \
+				"$HYDRA_ENDPOINT_SIZE" "$HYDRA_ENDPOINT1_OFFSET" "$BACKEND_RESET"
+			;;
 		all)
 			start_vm0
 			start_vm1
@@ -243,7 +300,7 @@ main() {
 		vm1) start_vm1 ;;
 		local|localfork) start_localfork ;;
 		*)
-			echo "usage: $0 [all|cxl|vm0|vm1|localfork]" >&2
+			echo "usage: $0 [check|all|cxl|vm0|vm1|localfork]" >&2
 			exit 2
 			;;
 	esac
