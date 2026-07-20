@@ -112,7 +112,7 @@ CXLfork 的核心价值是减少 remote fork 中的大量数据复制、序列�
 | 仓库 | 分支 | 最终代码提交 |
 | --- | --- | --- |
 | 主仓库 | `cohort-mr-cxlfork-static` | `efa6d04627787372c2cde9b8888f5186a07442de` |
-| MR 仓库 | `cohort-mr-cxlfork-static` | `1c48994dff98c82f0a4feb48e9d346b8d13dbe5e` |
+| MR 仓库 | `cohort-mr-cxlfork-static` | `518943bd1832eb8ca67e46ba2032a8ee2a910fcd` |
 | kernel | `cxlfork-kernel-paper-alignment` | `15ae46586aaff49c5f6b72271da8b5833899132a` |
 | 旧 CXLporter | `cxlfork-cohort-openwhisk` | `c511a78f186d899c5af1d7b086cd83f0a65813fc` |
 | HydraRPC 快照 | 独立源码树 | `eb185de17f16f138db2ae64176a892a33dd54d18` |
@@ -1019,7 +1019,7 @@ cxlfork/
 - `stage6-30-final/cxlfork/result.json`：端到端 summary；
 - `stage7-policies/`：四策略结果；
 - `state-binding-acceptance/`：应用状态强绑定验收结果；
-- `final-artifacts/mr-distributed-0172795-to-1c48994.diff`：当前 MR 完整源码差异；
+- `final-artifacts/mr-distributed-current.diff`：当前 MR 完整源码差异；
 - `final-artifacts/cxlfork-repro-current.diff`：当前主仓库差异；
 - `final-artifacts/mr-distributed-state-binding.bundle`：当前 MR Git bundle；
 - `final-artifacts/cxlfork-repro-current.bundle`：当前主仓库 Git bundle；
