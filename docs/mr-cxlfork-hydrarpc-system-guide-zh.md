@@ -1019,9 +1019,11 @@ cxlfork/
 - `stage6-30-final/cxlfork/result.json`：端到端 summary；
 - `stage7-policies/`：四策略结果；
 - `state-binding-acceptance/`：应用状态强绑定验收结果；
-- `final-artifacts/mr-distributed-0172795-to-debcb1b.diff`：MR 完整源码差异；
-- `final-artifacts/cxlfork-repro-352a1fe-to-efa6d04.diff`：主仓库差异；
-- `final-artifacts/*.bundle`：可恢复的 Git bundle。
+- `final-artifacts/mr-distributed-0172795-to-1c48994.diff`：当前 MR 完整源码差异；
+- `final-artifacts/cxlfork-repro-current.diff`：当前主仓库差异；
+- `final-artifacts/mr-distributed-state-binding.bundle`：当前 MR Git bundle；
+- `final-artifacts/cxlfork-repro-current.bundle`：当前主仓库 Git bundle；
+- 带 `debcb1b`、`efa6d04` 的旧文件是强绑定前的历史快照，不要当作当前源码。
 
 ## 21. 和旧 CXLporter/OpenWhisk 系统的关系
 
