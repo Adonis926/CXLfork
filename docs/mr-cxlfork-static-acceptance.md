@@ -44,7 +44,7 @@ kernel defect.
 | 5. Fixed concurrency | complete | MR `349180f` | async porter submit/collect and batched master dispatch run four fixed ghosts concurrently; reader count reaches four; eight one-shot reducer PIDs use shared leaves with zero fallback; undersized shuffle connection configuration fails explicitly; output and dmesg pass |
 | 6. Measurement and correctness closure | complete | MR `debcb1b` | versioned task-result envelope, non-overlapping task sub-interval, standard static runner, raw/summary CSV and 30-sample four-mode matrix pass; active/stale/release regression and dmesg pass |
 | 7. Final 91 acceptance and 103 profile | complete | main `3e81659` | four-policy smoke, final caps/build/cleanliness/dmesg checks and local backup pass; safe non-overlapping real-DAX launcher profile is documented but deliberately not run on occupied 103 host |
-| 8. Application-state binding | complete | MR `efb9706`, `6311b3e` | template v2 contains WordCount state consumed by map/hash/reduce; scale=2 changes output exactly; corrupt/wrong-role/stale cases fail with evidence; readers, dmesg and cleanup pass |
+| 8. Application-state binding | complete | MR `efb9706`, `6311b3e`, `1c48994` | template v2 contains WordCount state consumed by map/hash/reduce; scale=2 changes output exactly; all policies and corrupt/wrong-role/stale cases have evidence; readers, dmesg and cleanup pass |
 
 Each completed stage must build, run its success/boundary/failure tests, and
 check both guest kernels for BUG/WARNING/Oops/bad-page-table signatures before
@@ -145,7 +145,7 @@ the next stage begins.
   layout and gated migration order.  It is explicitly unvalidated: 103 was not
   contacted or modified because another group was using it.
 - Stage 7 froze MR `debcb1bda938f8a02021067d5cfa661896463d32`; Stage 8 advances
-  MR to `6311b3e0cf2d3340f3ed6ec84a7f56124ee85e58`.  Kernel remains
+  MR to `1c48994dff98c82f0a4feb48e9d346b8d13dbe5e`.  Kernel remains
   `15ae46586aaff49c5f6b72271da8b5833899132a`; kernel and legacy cxlporter were
   untouched.
 - Important code, diffs, acceptance documents, the complete 30-sample matrix,
@@ -157,7 +157,9 @@ the next stage begins.
 - Implementation commits: MR `efb9706375bcc293526891c1234360a199db20a1`
   makes template v2 state mandatory; MR
   `6311b3e0cf2d3340f3ed6ec84a7f56124ee85e58` adds failure-envelope retention,
-  automated acceptance and documentation.  Kernel and HydraRPC were unchanged.
+  automated acceptance and documentation; MR
+  `1c48994dff98c82f0a4feb48e9d346b8d13dbe5e` covers readonly, MoA and Hybrid.
+  Kernel and HydraRPC were unchanged.
 - `MR_WorkerStateV1` stores the ASCII word-character table, lowercase table,
   digit table, partition hash parameters, value radix/scale, role, version,
   checksum and reserved fields.  Mapper, default partitioner and Reducer call
@@ -176,6 +178,9 @@ the next stage begins.
   `3234589969764740584`; every expected WordCount value doubled exactly and
   the run passed `verify=all`.  This proves that a fake/no-op restore cannot
   be substituted while preserving the accepted task semantics.
+- The same state-bound WordCount completed under readonly, MoA and Hybrid;
+  reducer rows reported restore paths 5, 17 and 33 respectively, with nonzero
+  application access evidence and binding flags 15 in every case.
 - Corrupt state and wrong-role checkpoints reached the worker but were both
   rejected with status 84 (`EILSEQ`), zero application-access evidence and no
   output.  A stale generation was rejected with status 116.  Each failure

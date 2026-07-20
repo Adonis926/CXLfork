@@ -112,7 +112,7 @@ CXLfork 的核心价值是减少 remote fork 中的大量数据复制、序列�
 | 仓库 | 分支 | 最终代码提交 |
 | --- | --- | --- |
 | 主仓库 | `cohort-mr-cxlfork-static` | `efa6d04627787372c2cde9b8888f5186a07442de` |
-| MR 仓库 | `cohort-mr-cxlfork-static` | `6311b3e0cf2d3340f3ed6ec84a7f56124ee85e58` |
+| MR 仓库 | `cohort-mr-cxlfork-static` | `1c48994dff98c82f0a4feb48e9d346b8d13dbe5e` |
 | kernel | `cxlfork-kernel-paper-alignment` | `15ae46586aaff49c5f6b72271da8b5833899132a` |
 | 旧 CXLporter | `cxlfork-cohort-openwhisk` | `c511a78f186d899c5af1d7b086cd83f0a65813fc` |
 | HydraRPC 快照 | 独立源码树 | `eb185de17f16f138db2ae64176a892a33dd54d18` |
@@ -921,6 +921,7 @@ flags。强绑定成功的每一行必须有非零访问证据且 flags 为 15�
 
 - 正常 scale=1 CXLfork WordCount 正确，Reducer 均为 shared path 5、1,024 页；
 - 合法 scale=2 checkpoint 使全部输出计数严格变为两倍；
+- readonly、MoA、Hybrid 均在强绑定状态下通过，path 分别为 5、17、33；
 - 故意破坏 state table 后，kernel restore 仍能完成，但应用 bind 返回 `EILSEQ`；
 - Mapper template 被 Reducer 使用时返回 `EILSEQ`；
 - stale generation 返回 116，不能借用当前对象；
