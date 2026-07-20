@@ -1,6 +1,6 @@
 # CXLfork + HydraRPC 静态 MapReduce 系统完整说明
 
-> 文档状态：2026-07-18
+> 文档状态：2026-07-20
 >
 > 远端权威开发环境：`xtl@10.0.16.91:/home/xtl/cxlfork`
 >
@@ -54,6 +54,8 @@ CXLfork 的核心价值是减少 remote fork 中的大量数据复制、序列�
 - WordCount 代码已经存在于 `mr_hydra` 二进制中；restore 完成后，ghost 调用
   已编译好的 map/reduce 回调。不能把它描述为“从 CXL 中恢复了完整程序代码和
   任意执行上下文”。
+- 但 callback 已不能脱离 template 独立执行：字符表、hash 参数和数值解析/缩放
+  状态来自恢复出的 `MR_WorkerStateV1`，缺失或不匹配时任务失败。
 - 10.0.16.91 使用 QEMU 共享文件模拟可被两台 VM 共同访问的 CXL 内存，可以
   验证共享、页表和生命周期语义，但不能代表真实 CXL 硬件的绝对延迟、带宽、
   cache 或 NUMA 特性。
@@ -76,7 +78,7 @@ CXLfork 的核心价值是减少 remote fork 中的大量数据复制、序列�
 | worker | 真正执行 map 或 reduce 回调的子进程 |
 | porter | agent 内负责 worker/ghost 创建、唤醒、回收和 CXLfork restore 的本地控制层 |
 | ghost | 提前 fork、等待任务的一次性子进程；CXLfork 模式下会在任务到达后调用 `RESUME_V2` |
-| template | checkpoint 到 CXL 共享内存中的固定地址匿名 arena，带 key、generation 和 checksum |
+| template | checkpoint 到 CXL 的固定地址匿名 arena；v2 包含 callback 必须消费的 versioned worker state |
 | slot | CXLfork 共享窗口中保存一个 checkpoint 对象及其元数据的空间 |
 | generation | 同一 slot 被重新使用时区分新旧对象的版本号 |
 | reader | 正在 restore 或仍持有恢复映射的使用者；reader 非零时 slot 不能 release |
@@ -110,7 +112,7 @@ CXLfork 的核心价值是减少 remote fork 中的大量数据复制、序列�
 | 仓库 | 分支 | 最终代码提交 |
 | --- | --- | --- |
 | 主仓库 | `cohort-mr-cxlfork-static` | `efa6d04627787372c2cde9b8888f5186a07442de` |
-| MR 仓库 | `cohort-mr-cxlfork-static` | `debcb1bda938f8a02021067d5cfa661896463d32` |
+| MR 仓库 | `cohort-mr-cxlfork-static` | `6311b3e0cf2d3340f3ed6ec84a7f56124ee85e58` |
 | kernel | `cxlfork-kernel-paper-alignment` | `15ae46586aaff49c5f6b72271da8b5833899132a` |
 | 旧 CXLporter | `cxlfork-cohort-openwhisk` | `c511a78f186d899c5af1d7b086cd83f0a65813fc` |
 | HydraRPC 快照 | 独立源码树 | `eb185de17f16f138db2ae64176a892a33dd54d18` |
@@ -291,10 +293,11 @@ fallback_pages=0
 因此 sibling 仍指向原共享 leaf，checkpoint 数据也不被污染。该机制已在 kernel
 selftest 中通过 PFN/PTE/checksum 验证。
 
-需要注意：当前 WordCount 的业务输入放在 porter/Hydra payload 中，任务只读取
-CXLfork template header 做快速验证，并不会写完整 4 MiB template。因此 MR
-benchmark 可以证明 shared attach 和 restore 生命周期真实发生，但 MoW 数据页
-写 CoW 的主要硬证据仍来自底层 kernel selftest，而不是 WordCount 本身。
+需要注意：WordCount 的业务输入仍放在 porter/Hydra payload 中，但 callback 现在
+必须读取 CXLfork template v2 中的 worker state；缺失、损坏、角色不匹配或没有被
+callback 消费都会使任务失败。当前业务只读状态页，不会写完整 4 MiB template，
+所以 MoW 数据页写 CoW 的主要硬证据仍来自底层 kernel selftest，而不是 WordCount
+本身。
 
 ### 7.6 四种页面策略
 
@@ -303,14 +306,16 @@ benchmark 可以证明 shared attach 和 restore 生命周期真实发生，但 
 - `moa`：第一次访问时复制到本地。
 - `hybrid`：依据 checkpointed A/D 信息选择路径，并可配合 dirty prefetch。
 
-MR policy smoke 的实际结果：
+下面是 2026-07-16、应用状态强绑定之前的历史 policy smoke 结果：
 
 | 策略 | path mask | shared pages | local copy pages | 说明 |
 | --- | ---: | ---: | ---: | --- |
 | readonly | 5 | 1024 | 0 | shared-leaf 路径 |
 | MoW | 5 | 1024 | 0 | 本次业务没有写 template |
-| MoA | 17 | 0 | 1 | fast validation 只访问了 header 页 |
-| Hybrid | 33 | 0 | 0 | header-only smoke 没有触发本地 promotion |
+| MoA | 17 | 0 | 1 | 当时 fast validation 只访问 header 页 |
+| Hybrid | 33 | 0 | 0 | 当时 header-only smoke 没有触发本地 promotion |
+
+这些数据用于说明 kernel policy 路径，不能冒充当前 template v2 的重新测量结果。
 
 ### 7.7 尚未完整实现的内核能力
 
@@ -426,7 +431,8 @@ pre-fork 并等待
   -> ghost 被唤醒
   -> 打开 /dev/cxlfork
   -> RESUME_V2(key, generation, policy)
-  -> 校验 template header
+  -> 校验并 bind versioned worker state
+  -> callback 必须消费恢复状态
   -> 执行 map/reduce 回调
   -> GET_CALL_STATS_V2
   -> munmap 恢复区域并关闭 context/fd
@@ -442,8 +448,8 @@ pre-fork 并等待
 这是理解当前原型最重要的一点。
 
 template publisher 会在默认地址 `0x500000000000` 创建一段 2 MiB 对齐的私有匿名
-arena，写入固定 header 和可重复数据，然后调用 `PREPARE_V2`。最终实验通常使用
-4 MiB template：
+arena，写入 template v2 header、versioned `MR_WorkerStateV1` 和可重复 payload，
+然后调用 `PREPARE_V2`。当前实验通常使用 4 MiB template：
 
 ```text
 base  = 0x500000000000
@@ -461,7 +467,21 @@ prepare 返回：
 - page/region 数和耗时。
 
 目标 ghost 用 key+generation 恢复同一固定地址，并检查 role、base、bytes、seed、
-fingerprint 和 checksum 元数据。
+fingerprint、state checksum 和 checksum 元数据。
+
+`MR_WorkerStateV1` 保存 WordCount 真正使用的初始化状态：
+
+- 256 项 word-character 分类表；
+- 256 项小写转换表；
+- 256 项数字解析表；
+- partition hash 初值和乘数；
+- 数值 radix 和 `value_scale`；
+- role、版本、大小、flags、checksum 和 reserved 字段。
+
+Mapper、默认 partitioner 和 Reducer 都通过 `MR_GetWorkerState()` 读取这些字段。
+porter 要求 `template_binding_flags=15`，即 validated、role-match、app-consumed 和
+required 四个条件全部成立。合法的 scale=2 Reducer template 会使相同输入的所有
+WordCount 计数严格翻倍；损坏状态、错误角色和 stale generation 均已实测失败。
 
 它没有保存：
 
@@ -471,8 +491,9 @@ fingerprint 和 checksum 元数据。
 - HydraRPC socket/queue context；
 - 任意 fd、namespace 或容器状态。
 
-因此，最准确的说法是：系统把“受限匿名地址空间模板的 CXLfork restore”接入了
-真实 MR worker 激活生命周期，而不是透明 remote-fork 了一个运行中的 MR worker。
+因此，最准确的说法是：系统恢复的是 MR callback 正确执行所必需的、受限且只读
+的 worker 初始化状态，并把它接入真实 worker 激活生命周期；它仍不是透明
+remote-fork 一个运行中的完整 MR worker。
 
 ## 11. 一次完整作业如何运行
 
@@ -484,18 +505,18 @@ fingerprint 和 checksum 元数据。
 4. VM0 启动 master，打开 endpoint 0/1。
 5. master 批量派发 map；Mapper 子进程生成 partition 文件和 locations。
 6. master 按 reducer 聚合 locations，并向 VM1 批量派发 4 个 reduce。
-7. 每个 ghost 调用 `RESUME_V2`，校验 template 后执行 Reduce。
+7. 每个 ghost 调用 `RESUME_V2`，bind worker state，Reduce 必须消费该状态。
 8. Reducer 通过 HydraRPC 从 VM0 拉取远端 partition，写 spill 并汇总。
-9. agent 把 200-byte measurement envelope 和业务结果一起返回 master。
+9. agent 把 232-byte measurement envelope 和业务结果一起返回 master。
 10. master 校验 envelope、去掉它，再解析 WordCount 结果。
 11. master 写 output，向两个 agent 发 shutdown。
 12. 检查 reader 回到 0，用正确 generation release template。
 
 ## 12. 测量设计
 
-### 12.1 `mr_task_result_v1`
+### 12.1 `mr_task_result_v2`
 
-每个 map/reduce response 的业务 payload 前有固定 200-byte、versioned envelope。
+每个 map/reduce response 的业务 payload 前有固定 232-byte、versioned envelope。
 master 严格验证 magic、size、version 和 reserved 后才移除。
 
 主要字段：
@@ -508,13 +529,17 @@ master 严格验证 magic、size、version 和 reserved 后才移除。
 | `fork_ns` | localfork 的 fork 时间 |
 | `wakeup_ns` | 本地 slot 发布到 worker 开始 |
 | `restore_ioctl_ns` | 用户态包围 `RESUME_V2` 的墙钟区间 |
-| `template_validate_ns` | ghost 对 template header 的验证 |
+| `template_validate_ns` | ghost 对 template header/state 的验证和 role bind |
 | `task_ns` | 只包围应用 map/reduce 回调，不包含 restore |
 | `reap_ns` | `waitpid()` 回收一次性 worker |
 | `refill_ns` | 补充新 ghost |
 | `kernel_total_ns` | 内核按本次 restore 返回的 total |
 | `path_mask` | 本次实际使用的恢复路径 |
 | page counters | shared leaf、fallback、本地复制和 leaf copy 页数 |
+| `template_state_checksum` | 实际 bind 的 worker-state checksum |
+| `template_access_checksum/count` | callback 获取和消费恢复状态的证据 |
+| `template_state_pages` | worker state 覆盖的页面数；当前为 1 |
+| `template_binding_flags` | 必须为 15，表示四项 binding 条件全部成立 |
 
 ### 12.2 字段不能随便相加
 
@@ -651,7 +676,7 @@ scp -P 2200 -o StrictHostKeyChecking=no \
 
 ```bash
 PUB=$(ssh -p 2200 -o StrictHostKeyChecking=no ubuntu@localhost \
-  'sudo /tmp/mr_hydra template --role=reduce --key=1002 --bytes=4194304')
+  'sudo /tmp/mr_hydra template --role=reduce --key=1002 --bytes=4194304 --value-scale=1')
 
 echo "$PUB"
 GEN=$(echo "$PUB" | sed -n 's/.* generation=\([0-9][0-9]*\).*/\1/p')
@@ -708,6 +733,7 @@ ssh -p 2201 -o StrictHostKeyChecking=no ubuntu@localhost \
      --template-key=1002 --template-generation=$GEN \
      --template-page-checksum=$SUM \
      --template-bytes=4194304 \
+     --template-value-scale=1 \
      --cxlfork-policy=mow --validation=fast \
      --store-dir=/tmp/mr-manual-reduce \
      --size=2147483648 --shuffle-size=2147483648 \
@@ -807,6 +833,7 @@ scripts/run-bench.sh \
   --size=2147483648 --payload-max=4194304 \
   --schedule=role-static --reducers=4 --shuffle-connections=4 \
   --template-bytes=4194304 \
+  --template-value-scale=1 \
   --reduce-template-key=1002 \
   --reduce-template-generation="$GEN" \
   --reduce-template-checksum="$SUM" \
@@ -842,6 +869,9 @@ reduce,cxlfork,4
 | `logs/` | master/agent 日志、build/prepare 日志、校验 diff |
 
 `tasks.csv` 中 kind `1` 是 map，kind `2` 是 reduce。
+
+当前 CSV 还包含 template-state checksum、访问 checksum/count、状态页数和 binding
+flags。强绑定成功的每一行必须有非零访问证据且 flags 为 15。
 
 ## 18. 已完成的测试
 
@@ -887,7 +917,18 @@ reduce,cxlfork,4
 - readonly/MoW/MoA/Hybrid smoke；
 - rollback、reader、release 和 dmesg。
 
-### 18.6 每阶段公共验收
+### 18.6 应用状态强绑定
+
+- 正常 scale=1 CXLfork WordCount 正确，Reducer 均为 shared path 5、1,024 页；
+- 合法 scale=2 checkpoint 使全部输出计数严格变为两倍；
+- 故意破坏 state table 后，kernel restore 仍能完成，但应用 bind 返回 `EILSEQ`；
+- Mapper template 被 Reducer 使用时返回 `EILSEQ`；
+- stale generation 返回 116，不能借用当前对象；
+- 三个失败路径都保留 versioned failure envelope，reader 最终为 0；
+- 自动验收脚本：`mr-distributed/scripts/test-state-binding.sh`；
+- 原始结果：`/home/xtl/cxlfork/mr-static-results/state-binding-acceptance`。
+
+### 18.7 每阶段公共验收
 
 - 两种 build；
 - 成功、边界和失败用例；
@@ -901,7 +942,11 @@ reduce,cxlfork,4
 docs/mr-cxlfork-static-acceptance.md
 ```
 
-## 19. 最终性能结果
+## 19. 既有性能结果（template v1，强绑定前）
+
+本节 30 次数据来自 MR 提交 `debcb1b`，当时 template 只做 header validation。
+它仍可作为此前控制路径基线，但不是当前 template v2 的正式性能数据；论文主实验
+需要在 `6311b3e` 或更新提交上重新运行完整矩阵。
 
 最终数据使用同一 256,000-byte WordCount 输入、VM0 Mapper localfork、VM1 4 个
 Reducer、5 次 warmup、30 次 repeat、`verify=all`。变化的是 Reducer launch mode。
@@ -948,6 +993,7 @@ Reducer、5 次 warmup、30 次 repeat、`verify=all`。变化的是 Reducer lau
 | --- | --- |
 | `/home/xtl/cxlfork/mr-static-results/stage6-30-final` | 四种 launch mode 的最终 30 次矩阵 |
 | `/home/xtl/cxlfork/mr-static-results/stage7-policies` | readonly/MoW/MoA/Hybrid smoke |
+| `/home/xtl/cxlfork/mr-static-results/state-binding-acceptance` | template v2 正常、scale=2、损坏、错误角色和 stale 验收 |
 | `/home/xtl/cxlfork/mr-static-results/final-artifacts` | 完整 diff、Git bundle、验收文档和脚本快照 |
 
 `stage6-30-final` 下有四个子目录：
@@ -965,13 +1011,13 @@ cxlfork/
 /home/adonis/cxlfork/backups/mr-cxlfork-static-20260716
 ```
 
-该备份共 910 个文件、约 6.8 MiB。关键 diff、CSV 和 JSON 已与远端做 SHA-256
-比对。重要入口：
+关键 diff、CSV、JSON 和最新状态强绑定结果均应与远端做 SHA-256 比对。重要入口：
 
 - `stage6-30-final/cxlfork/tasks.csv`：CXLfork 逐任务原始数据；
 - `stage6-30-final/cxlfork/task_summary.csv`：CXLfork task summary；
 - `stage6-30-final/cxlfork/result.json`：端到端 summary；
 - `stage7-policies/`：四策略结果；
+- `state-binding-acceptance/`：应用状态强绑定验收结果；
 - `final-artifacts/mr-distributed-0172795-to-debcb1b.diff`：MR 完整源码差异；
 - `final-artifacts/cxlfork-repro-352a1fe-to-efa6d04.diff`：主仓库差异；
 - `final-artifacts/*.bundle`：可恢复的 Git bundle。
@@ -1140,6 +1186,8 @@ done
 - VM0 Mapper/VM1 Reducer 的 HydraRPC 控制和 shuffle 路径完整；
 - localfork、prefork、CXLfork 的 worker 生命周期可按单次任务拆分；
 - kernel restore 与更大控制路径可以分别测量。
+- WordCount callback 必须消费恢复出的 worker state；改变合法 state 会受控改变输出，
+  损坏、错误角色或 stale 对象不会继续执行任务。
 
 不能声称：
 

@@ -44,6 +44,7 @@ kernel defect.
 | 5. Fixed concurrency | complete | MR `349180f` | async porter submit/collect and batched master dispatch run four fixed ghosts concurrently; reader count reaches four; eight one-shot reducer PIDs use shared leaves with zero fallback; undersized shuffle connection configuration fails explicitly; output and dmesg pass |
 | 6. Measurement and correctness closure | complete | MR `debcb1b` | versioned task-result envelope, non-overlapping task sub-interval, standard static runner, raw/summary CSV and 30-sample four-mode matrix pass; active/stale/release regression and dmesg pass |
 | 7. Final 91 acceptance and 103 profile | complete | main `3e81659` | four-policy smoke, final caps/build/cleanliness/dmesg checks and local backup pass; safe non-overlapping real-DAX launcher profile is documented but deliberately not run on occupied 103 host |
+| 8. Application-state binding | complete | MR `efb9706`, `6311b3e` | template v2 contains WordCount state consumed by map/hash/reduce; scale=2 changes output exactly; corrupt/wrong-role/stale cases fail with evidence; readers, dmesg and cleanup pass |
 
 Each completed stage must build, run its success/boundary/failure tests, and
 check both guest kernels for BUG/WARNING/Oops/bad-page-table signatures before
@@ -107,7 +108,8 @@ the next stage begins.
   kernel-reported restore total 12.626 us, and ghost refill 69.745 us.  Every
   task reported path mask 5, 1,024 shared-leaf pages, zero fallback pages and
   a distinct one-shot PID for that task invocation.
-- The response begins with fixed-size `mr_task_result_v1` and is validated by
+- At this historical revision, the response began with fixed-size
+  `mr_task_result_v1` and was validated by
   magic, size, version and zero reserved fields before master strips it from
   the business payload.  `task_ns` measures only the application callback;
   restore, template validation, reap and refill are separate sub-intervals,
@@ -142,10 +144,45 @@ the next stage begins.
 - `docs/mr-cxlfork-103-migration-profile.md` records the proposed first 8 GiB
   layout and gated migration order.  It is explicitly unvalidated: 103 was not
   contacted or modified because another group was using it.
-- Final revisions are MR `debcb1bda938f8a02021067d5cfa661896463d32` and kernel
-  `15ae46586aaff49c5f6b72271da8b5833899132a`; the kernel and legacy cxlporter
-  remained untouched.  MR/main/kernel/cxlporter worktrees were clean before
-  the final documentation commit.
+- Stage 7 froze MR `debcb1bda938f8a02021067d5cfa661896463d32`; Stage 8 advances
+  MR to `6311b3e0cf2d3340f3ed6ec84a7f56124ee85e58`.  Kernel remains
+  `15ae46586aaff49c5f6b72271da8b5833899132a`; kernel and legacy cxlporter were
+  untouched.
 - Important code, diffs, acceptance documents, the complete 30-sample matrix,
   and policy results are copied to the local jump-host backup directory
   `/home/adonis/cxlfork/backups/mr-cxlfork-static-20260716`.
+
+## Stage 8 evidence
+
+- Implementation commits: MR `efb9706375bcc293526891c1234360a199db20a1`
+  makes template v2 state mandatory; MR
+  `6311b3e0cf2d3340f3ed6ec84a7f56124ee85e58` adds failure-envelope retention,
+  automated acceptance and documentation.  Kernel and HydraRPC were unchanged.
+- `MR_WorkerStateV1` stores the ASCII word-character table, lowercase table,
+  digit table, partition hash parameters, value radix/scale, role, version,
+  checksum and reserved fields.  Mapper, default partitioner and Reducer call
+  `MR_GetWorkerState()` and use these values.  A callback that does not consume
+  state cannot set all required binding flags and the porter returns failure.
+- The wire result is now the strict 232-byte `mr_task_result_v2`.  Successful
+  rows contain state/access checksums, nonzero access count, one state page and
+  `template_binding_flags=15`.  Failed porter tasks retain the same versioned
+  envelope rather than being printed as a binary error string.
+- Automated command: `scripts/test-state-binding.sh`.  Authoritative results:
+  `/home/xtl/cxlfork/mr-static-results/state-binding-acceptance`.
+- Normal scale=1: `status=ok`, `correctness=ok`; both reducers used path 5,
+  1,024 shared-leaf pages, zero fallback, state checksum
+  `16711033182850390991`, 512 state acquisitions, one state page and flags 15.
+- Semantic-dependency test: a valid scale=2 checkpoint used state checksum
+  `3234589969764740584`; every expected WordCount value doubled exactly and
+  the run passed `verify=all`.  This proves that a fake/no-op restore cannot
+  be substituted while preserving the accepted task semantics.
+- Corrupt state and wrong-role checkpoints reached the worker but were both
+  rejected with status 84 (`EILSEQ`), zero application-access evidence and no
+  output.  A stale generation was rejected with status 116.  Each failure
+  returned reader count to zero and preserved its failure row in `tasks.csv`.
+- VM0/VM1 report identical CXLfork caps.  Both CXL-enabled and disabled builds
+  pass; final dmesg logs are empty for BUG/WARNING/Oops/bad-pagetable/panic
+  patterns; no worker remains; test key 2002 is released.
+- The older 30-sample Stage 6 matrix predates this binding and remains a
+  historical control-path baseline.  Publication performance numbers for the
+  current system must be rerun from MR `6311b3e` or later.
