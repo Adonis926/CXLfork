@@ -537,6 +537,86 @@ porter 要求 `template_binding_flags=15`，即 validated、role-match、app-con
 required 四个条件全部成立。合法的 scale=2 Reducer template 会使相同输入的所有
 WordCount 计数严格翻倍；损坏状态、错误角色和 stale generation 均已实测失败。
 
+### 10.1 Worker state 的物理布局和消费者
+
+当前 `MR_WorkerStateV1` 版本为 1，大小固定为 856 字节，位于 template
+`base + 128`，只覆盖一个 4 KiB 页面。template header 单独保存 state offset、大小、
+checksum、config fingerprint 和 required binding flags；header 是封装/校验信息，
+worker state 才是 callback 真正消费的应用状态。
+
+| Worker state 字段 | 当前语义 | 实际消费者 |
+| --- | --- | --- |
+| `word_char[256]` | 判断字母、数字和下划线能否组成单词 | Mapper callback |
+| `lower[256]` | 把 ASCII 大写字母规范为小写 | Mapper callback |
+| `hash_initial=5381` | partition hash 初值 | 默认 partitioner |
+| `hash_multiplier=33` | partition hash 每字符乘数 | 默认 partitioner |
+| `digit[256]` | 把字符 `0-9` 解析为数值，其他字符为无效值 | Reducer callback |
+| `value_radix=10` | Reducer value 的数制 | Reducer callback |
+| `value_scale` | 对解析出的计数进行受控缩放，默认 1 | Reducer callback |
+| `role` | 限定 map、reduce 或 both | bind/porter |
+| magic/version/size/flags/checksum/reserved | ABI、配置和完整性校验 | template bind |
+
+Map 输入、`IntermediateLocation[]`、shuffle chunk 和最终输出不在 worker state 中，
+它们仍由 HydraRPC/porter payload 提供；Map/Reduce 机器码也不在 worker state 中，
+它已经编译进目标端 `mr_hydra`。
+
+### 10.2 从 restore 到业务成功的强绑定链
+
+一次 CXLfork task 只有经过下面的完整链条才会被报告为成功：
+
+```text
+RESUME_V2 映射 template
+  -> mr_template_bind 校验 header、state、role、checksum 和 fingerprint
+  -> begin_worker_state 把恢复出的 state 设为本次 callback 的唯一绑定状态
+  -> Mapper / Partitioner / Reducer 调用 MR_GetWorkerState
+  -> runtime 累计 access_count 和 access_checksum
+  -> finish_worker_state 确认 callback 确实消费过 state
+  -> porter 检查四个 required binding flags 全部存在
+  -> master 验证 versioned mr_task_result_v2 envelope
+```
+
+四个 flag 是：
+
+| Flag | 含义 |
+| --- | --- |
+| `validated` | template header/state 的结构和 checksum 已通过 |
+| `role-match` | template role 与本次 Map/Reduce 任务匹配 |
+| `app-consumed` | callback 至少一次真实取得并消费 worker state |
+| `required` | 当前 template 明确要求强绑定，而非可选提示 |
+
+成功结果必须满足：
+
+```text
+template_binding_flags = 15
+template_state_pages   = 1
+template_access_count  > 0
+```
+
+同时返回 `template_state_checksum` 和 `template_access_checksum`，用于区分“映射了一页”
+和“应用实际使用了这页”。错误路径也保留固定 232 字节的 `mr_task_result_v2` failure
+envelope，便于证明失败发生在哪一层，并检查 reader 是否回到 0。
+
+非 CXL 的 persistent、localfork 和 local-prefork baseline 会在本地构造语义等价的
+versioned state，使用同一套 callback 和 binding 检查。这样不同 launch mode 比较的
+业务逻辑一致，不会因为 CXLfork 独有一套 WordCount 规则而产生不公平差异。
+
+### 10.3 语义依赖证据和保证边界
+
+自动验收不仅检查 ioctl 是否成功，还做了以下因果测试：
+
+- scale=1 产生标准 WordCount；
+- 发布合法 scale=2 state 后，相同输入的每个输出计数严格翻倍；
+- 故意损坏 `lower[]` 后，kernel restore 可以完成，但应用 bind 以 `EILSEQ` 失败；
+- Mapper/Reducer role 不匹配和 stale generation 均明确失败；
+- readonly、MoA、Hybrid 都有非零 access evidence 和完整 binding flags；
+- 所有失败路径 reader 回到 0，不产生业务输出。
+
+这证明：**一个不提供内容等价 worker state 的 no-op restore 不能保持当前任务语义**。
+它不证明任何其他来源都绝不可能构造相同字节，也不把 template 升格为完整运行中进程
+checkpoint。实现提交是 MR `efb9706`、`6311b3e`、`1c48994` 和用于限定保证表述的
+`518943b`；权威结果位于
+`/home/xtl/cxlfork/mr-static-results/state-binding-acceptance`。
+
 它没有保存：
 
 - WordCount 函数机器码；
@@ -1277,7 +1357,7 @@ done
 
 - MR、kernel、HydraRPC、启动脚本或 UAPI 的行为变化；
 - master/agent/porter/worker 的进程关系或通信方式变化；
--共享内存文件、offset、容量或 VM 拓扑变化；
+- 共享内存文件、offset、容量或 VM 拓扑变化；
 - template 内容、支持策略、capability 或失败语义变化；
 - benchmark 字段、默认参数、结果路径或权威数据集变化。
 
