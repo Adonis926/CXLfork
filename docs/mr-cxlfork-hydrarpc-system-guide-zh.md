@@ -1,12 +1,26 @@
 # CXLfork + HydraRPC 静态 MapReduce 系统完整说明
 
-> 文档状态：2026-07-20
+> 文档状态：2026-07-21，已同步当前 template v2 应用状态强绑定、角色/进程模型和
+> HydraRPC 共享内存通信语义
 >
 > 远端权威开发环境：`xtl@10.0.16.91:/home/xtl/cxlfork`
 >
 > 本地跳板机与备份目录：`/home/adonis/cxlfork`
 >
 > 本文描述的是 `cohort-mr-cxlfork-static` 分支上的最终静态集成系统。
+
+当前运行时代码锚点是 MR `518943bd1832eb8ca67e46ba2032a8ee2a910fcd`、kernel
+`15ae46586aaff49c5f6b72271da8b5833899132a` 和 HydraRPC
+`eb185de17f16f138db2ae64176a892a33dd54d18`。主仓库在运行环境集成完成后仍会增加
+说明、验收和备份提交，因此主仓库文档不把自身提交哈希写成永久“最终值”；应使用
+`git rev-parse HEAD` 核对当前分支顶端。
+
+配套文档：
+
+- [Data Plane 与 Control Plane 架构说明](mr-cxlfork-architecture-data-control-plane-zh.md)：
+  面向初学者解释物理拓扑、进程角色和完整数据/控制路径；
+- [静态 MR 集成验收记录](mr-cxlfork-static-acceptance.md)：记录每阶段实现提交和测试
+  证据。
 
 ## 1. 先用一句话理解这个系统
 
@@ -109,9 +123,9 @@ CXLfork 的核心价值是减少 remote fork 中的大量数据复制、序列�
 
 ### 5.2 最终分支和提交
 
-| 仓库 | 分支 | 最终代码提交 |
+| 仓库 | 分支 | 当前运行时代码/基线 |
 | --- | --- | --- |
-| 主仓库 | `cohort-mr-cxlfork-static` | `efa6d04627787372c2cde9b8888f5186a07442de` |
+| 主仓库 | `cohort-mr-cxlfork-static` | 运行环境集成基线 `efa6d046`；当前文档 HEAD 用 `git rev-parse HEAD` 查询 |
 | MR 仓库 | `cohort-mr-cxlfork-static` | `518943bd1832eb8ca67e46ba2032a8ee2a910fcd` |
 | kernel | `cxlfork-kernel-paper-alignment` | `15ae46586aaff49c5f6b72271da8b5833899132a` |
 | 旧 CXLporter | `cxlfork-cohort-openwhisk` | `c511a78f186d899c5af1d7b086cd83f0a65813fc` |
@@ -355,7 +369,35 @@ map/reduce 回调。
 HydraRPC payload 的指针只在一次 request/response 生命周期内有效，因此 Reducer
 收到 shuffle chunk 后立刻写 spill，不长期保存共享内存指针。
 
-### 8.3 node-level endpoint
+### 8.3 HydraRPC 的通信本质
+
+HydraRPC 不是独立 daemon，而是链接进 master、agent 和需要远程 shuffle 的 worker
+中的用户态库。它的本质是一个工程化的共享变量协议：两端映射同一段 ivshmem，发送方
+把 message/payload 写入共享内存，再用原子 queue entry 和 `tail` 发布；接收方轮询
+`tail/READY`，读取请求，另行分配 response block 并发布到 response queue。
+
+当前同步依赖：
+
+- 共享 request/response ring 的原子 `head`、`tail` 和 `READY` entry；
+- 发送方 release、接收方 acquire 的内存顺序；
+- shared-pair queue 的 CAS spinlock，或 single-producer/single-consumer 无锁路径；
+- 共享 payload allocator、segment generation 和 remote-free queue；
+- `hydrarpc-poll` busy polling；库支持时也可使用 `UMONITOR/UMWAIT`。
+
+因此 HydraRPC 与“共享内存中放一个变量并轮询”没有介质上的本质差异；它是在这个原理
+上增加队列、并发、可变 payload、response 匹配、backpressure 和安全回收。若后续
+增加 per-worker direct mailbox，正确表述应是“通用共享内存 RPC 与专用共享状态协议
+的对比”，而不是“RPC 与共享内存的对比”。
+
+当前 HydraRPC 通信关系只有三类：
+
+1. VM0 master 与 VM0 Mapper agent：Map task、location 和 completion；
+2. VM0 master 与 VM1 Reducer agent：Reduce task、输出和测量结果；
+3. VM1 Reducer worker 与 VM0 Mapper agent：远程 shuffle fetch/chunk。
+
+agent 与 porter supervisor、supervisor 与 worker 的本地通信不使用 HydraRPC。
+
+### 8.4 node-level endpoint
 
 外部只有两个长期角色：
 
@@ -378,7 +420,7 @@ shuffle-connections >= workers
 每个 Reducer worker 固定绑定一个 response connection。配置 4 个 worker 却只给
 1 个 connection 会在 agent 启动时明确失败，而不是运行中静默卡死。
 
-### 8.4 固定角色调度
+### 8.5 固定角色调度
 
 最终实验使用：
 
@@ -409,12 +451,24 @@ master 以固定窗口并发派发：一批最多给每个 worker 一个任务�
 
 ### 9.1 porter 内部结构
 
-agent 启动时创建：
+这里的 `porter` 需要区分两个实体：
+
+- `mr_porter` 对象不是进程，而是 agent heap 中的管理结构，保存
+  `supervisor_pid`、`control_fd`、本地共享区指针、worker 数和 `busy[]`；
+- porter supervisor 是 `mr_porter_start()` 通过普通 `fork()` 创建的独立子进程，
+  真正负责创建、等待、回收和 refill worker。
+
+agent 启动 porter 时创建：
 
 - 每个 worker 一个共享 slot，保存 task descriptor、payload 和 response；
 - 一个 `SOCK_SEQPACKET` control channel；
 - 一个 porter supervisor；
 - 根据 launch mode 创建 worker/ghost 池。
+
+agent 调用 `mr_porter_submit()/collect()` 属于同一进程内的普通函数调用。agent 与
+supervisor 通过 Unix `SOCK_SEQPACKET` 交换 `INIT/DISPATCH/STOP` 控制包；任务数据和
+结果位于本地 `MAP_SHARED|MAP_ANONYMOUS` slot。worker 不读取这个 Unix socket，而是
+轮询自己的 slot 状态，观察 `READY` 后执行，完成时发布 `DONE`。
 
 porter 支持异步 `submit/collect`。supervisor 同时观察多个 worker slot，所以
 4 个 ghost 可以真正并发，而不是 master 批量发送后仍在 supervisor 内串行。
@@ -1206,15 +1260,42 @@ done
 ## 26. 建议阅读顺序
 
 1. 本文：理解当前静态 MR+CXLfork 系统全貌。
-2. `docs/mr-cxlfork-static-acceptance.md`：查看阶段验收和硬证据。
-3. `mr-distributed/README.md`：查看 MR CLI、调度和 wire format。
-4. `docs/cxlfork-reproduction-system-guide-zh.md`：了解底层 CXLfork 和旧
+2. `docs/mr-cxlfork-architecture-data-control-plane-zh.md`：用图和分层模型理解
+   master、agent、porter、worker、HydraRPC 与 CXLfork。
+3. `docs/mr-cxlfork-static-acceptance.md`：查看阶段验收和硬证据。
+4. `mr-distributed/README.md`：查看 MR CLI、调度和 wire format。
+5. `docs/cxlfork-reproduction-system-guide-zh.md`：了解底层 CXLfork 和旧
    OpenWhisk/CXLporter 全系统。
-5. `docs/cxlfork-phase-acceptance-log.md`：审计内核各阶段测试。
-6. `docs/cxlfork-paper-alignment-status.md`：查看论文真实性矩阵。
-7. `docs/mr-cxlfork-103-migration-profile.md`：迁移真实 DAX 前阅读。
+6. `docs/cxlfork-phase-acceptance-log.md`：审计内核各阶段测试。
+7. `docs/cxlfork-paper-alignment-status.md`：查看论文真实性矩阵。
+8. `docs/mr-cxlfork-103-migration-profile.md`：迁移真实 DAX 前阅读。
 
-## 27. 最后总结
+## 27. 文档同步规则
+
+本文是当前静态 MR+CXLfork 系统的权威总入口。以后出现下列任一变化，都必须在同一个
+开发阶段同步本文，不能只修改代码或测试脚本：
+
+- MR、kernel、HydraRPC、启动脚本或 UAPI 的行为变化；
+- master/agent/porter/worker 的进程关系或通信方式变化；
+-共享内存文件、offset、容量或 VM 拓扑变化；
+- template 内容、支持策略、capability 或失败语义变化；
+- benchmark 字段、默认参数、结果路径或权威数据集变化。
+
+更新时至少执行：
+
+1. 更新顶部日期和运行时代码锚点；
+2. 修改对应机制、命令、能力边界和测试路径；
+3. 将旧性能数据标成历史数据，不能让它看起来属于新版本；
+4. 运行 `git diff --check`，检查 Markdown code fence 配对；
+5. 在远端专用分支提交并推送；
+6. 同步到 `/home/adonis/cxlfork/docs` 和本地重要备份区；
+7. 重新生成当前主仓库 diff/bundle 和 SHA256 清单。
+
+主仓库文档提交会改变主仓库 HEAD，因此本文不硬编码“文档自身的最终提交”。核查时
+以远端干净工作树、`git rev-parse HEAD` 和 `git rev-list --left-right --count
+@{u}...HEAD` 为准。
+
+## 28. 最后总结
 
 当前系统已经形成一条完整、受限但可信的研究链路：
 
