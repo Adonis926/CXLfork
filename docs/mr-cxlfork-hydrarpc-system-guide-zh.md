@@ -1,16 +1,16 @@
 # CXLfork + HydraRPC 静态 MapReduce 系统完整说明
 
-> 文档状态：2026-07-21，已同步当前 template v2 应用状态强绑定、角色/进程模型和
-> HydraRPC 共享内存通信语义
+> 文档状态：2026-07-22，已同步 Motivation V3 排他统计、activation probe、
+> Hydra 初始化/启动 barrier 和正式数据目录
 >
 > 远端权威开发环境：`xtl@10.0.16.91:/home/xtl/cxlfork`
 >
 > 本地跳板机与备份目录：`/home/adonis/cxlfork`
 >
-> 本文描述的是 `cohort-mr-cxlfork-static` 分支上的最终静态集成系统。
+> 本文描述的是静态集成基线及其
+> `cohort-motivation-control-plane-measurement` 测量收口分支。
 
-当前运行时代码锚点是 MR `518943bd1832eb8ca67e46ba2032a8ee2a910fcd`、kernel
-`15ae46586aaff49c5f6b72271da8b5833899132a` 和 HydraRPC
+当前 Motivation 运行时代码至少包含 MR `7a67dd9`、kernel `a1d1f8fef` 和 HydraRPC
 `eb185de17f16f138db2ae64176a892a33dd54d18`。主仓库在运行环境集成完成后仍会增加
 说明、验收和备份提交，因此主仓库文档不把自身提交哈希写成永久“最终值”；应使用
 `git rev-parse HEAD` 核对当前分支顶端。
@@ -20,7 +20,9 @@
 - [Data Plane 与 Control Plane 架构说明](mr-cxlfork-architecture-data-control-plane-zh.md)：
   面向初学者解释物理拓扑、进程角色和完整数据/控制路径；
 - [静态 MR 集成验收记录](mr-cxlfork-static-acceptance.md)：记录每阶段实现提交和测试
-  证据。
+  证据；
+- [Cohort Motivation 性能测试说明](cohort-motivation-benchmark-guide-zh.md)：说明 V3
+  测量边界、脚本、正式数据、初步结论和不可引用的数据。
 
 ## 1. 先用一句话理解这个系统
 
@@ -1340,15 +1342,17 @@ done
 ## 26. 建议阅读顺序
 
 1. 本文：理解当前静态 MR+CXLfork 系统全貌。
-2. `docs/mr-cxlfork-architecture-data-control-plane-zh.md`：用图和分层模型理解
+2. `docs/cohort-motivation-benchmark-guide-zh.md`：理解 activation、V3 排他统计、
+   时钟规则、正式 runner 与结果目录。
+3. `docs/mr-cxlfork-architecture-data-control-plane-zh.md`：用图和分层模型理解
    master、agent、porter、worker、HydraRPC 与 CXLfork。
-3. `docs/mr-cxlfork-static-acceptance.md`：查看阶段验收和硬证据。
-4. `mr-distributed/README.md`：查看 MR CLI、调度和 wire format。
-5. `docs/cxlfork-reproduction-system-guide-zh.md`：了解底层 CXLfork 和旧
+4. `docs/mr-cxlfork-static-acceptance.md`：查看阶段验收和硬证据。
+5. `mr-distributed/README.md`：查看 MR CLI、调度和 wire format。
+6. `docs/cxlfork-reproduction-system-guide-zh.md`：了解底层 CXLfork 和旧
    OpenWhisk/CXLporter 全系统。
-6. `docs/cxlfork-phase-acceptance-log.md`：审计内核各阶段测试。
-7. `docs/cxlfork-paper-alignment-status.md`：查看论文真实性矩阵。
-8. `docs/mr-cxlfork-103-migration-profile.md`：迁移真实 DAX 前阅读。
+7. `docs/cxlfork-phase-acceptance-log.md`：审计内核各阶段测试。
+8. `docs/cxlfork-paper-alignment-status.md`：查看论文真实性矩阵。
+9. `docs/mr-cxlfork-103-migration-profile.md`：迁移真实 DAX 前阅读。
 
 ## 27. 文档同步规则
 
@@ -1375,7 +1379,28 @@ done
 以远端干净工作树、`git rev-parse HEAD` 和 `git rev-list --left-right --count
 @{u}...HEAD` 为准。
 
-## 28. 最后总结
+## 28. Motivation 测量收口
+
+测量分支在原 V2 envelope 上增加了：
+
+- `task_result_v3`：目标 VM 从 agent receive 到 application state access 的完整时间线；
+- kernel V3：单次 restore 的互斥 bucket，和必须严格等于 kernel total；
+- `hydra_task_v1` / `hydra_response_v1`：请求和响应两端本地分项；
+- activation probe：不执行 shuffle，只验证 restore、bind 和首次状态消费；
+- preopen / per-request：显式分开可缓存 setup 与默认 fast path；
+- master/agent/start barrier：master 先初始化共享 layout，agent 完成 attach 后才开始计时；
+- 1000-sample activation 和 100-job WordCount 的不同统计规则。
+
+重要修复包括：porter 只有 supervisor 收到命令后才能发布 READY；agent 不再可能抢在
+supervisor 前 restore。Hydra master 先重建 endpoint，防止 agent 附着上一轮旧
+connection layout。WordCount job timer 在两个 agent 都 ready 后才开始，不包含 runner
+通过 SSH 启动 agent 的时间。
+
+正式数据、不可引用的 superseded 数据和手工命令统一记录在
+`docs/cohort-motivation-benchmark-guide-zh.md`。不要继续使用旧 `stage6-30-final` 的
+30 次样本报告 P99，也不要把旧 `task_result_v2` 父子字段直接相加。
+
+## 29. 最后总结
 
 当前系统已经形成一条完整、受限但可信的研究链路：
 
@@ -1386,7 +1411,7 @@ WordCount task
   -> MR porter and one-shot ghost
   -> CXLfork RESUME_V2 and shared PTE leaf
   -> Reduce execution
-  -> per-call measurement envelope
+  -> V3 per-call exclusive measurement envelope
   -> verified output and lifecycle cleanup
 ```
 
