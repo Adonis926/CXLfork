@@ -140,3 +140,52 @@ cookie/checksum 和独占统计。
 
 - 远端：`results/paper-system/20260724-catalog/`
 - 本地跳板机备份：`remote-backup-20260724/paper-system/catalog/`
+
+### S3：独立 paper VM profile 与论文规模容量
+
+状态：通过。kernel 提交：`1cb6747e8`、`f1599b6b6`。
+
+环境隔离：
+
+- 原 `vm0.qcow2`、`vm1.qcow2` 只在停机状态下读取，没有原地修改。
+- 新建 `paper-vm0.qcow2`、`paper-vm1.qcow2`，各自扩展为 40 GiB。
+- paper VM 使用独立端口 2400/2401、独立 PID/monitor/console 文件和
+  `/dev/shm/cxlfork_paper_mem` 16 GiB backend。
+- 原 4 GiB profile 仍可运行；slot 数根据实际 CXL window 计算为 3，
+  证明扩大编译上限不会让旧环境越界。
+
+实现内容：
+
+- 单 slot 从 512 MiB 扩展为 1 GiB，PTE 上限从 131,072 扩展为 262,144。
+- 编译期最多 14 个 slot，但 `QUERY_CAPS_V2.max_slots` 和 key 映射均使用
+  当前 `cxl_size` 推导的运行时 slot 数。
+- selftest 新增 `caps` 子命令，直接输出运行时容量与 ABI 能力。
+- paper guest 安装 Docker 29.1.3 和 OpenJDK 17；Docker 使用 `vfs`、
+  禁用 bridge/iptables，以适配本实验内核的模块配置。
+
+验收结果：
+
+- 两台 paper VM 均运行 kernel build `#88`，映射 CXL window
+  `17,095,983,104` bytes。
+- 两台 `QUERY_CAPS_V2` 均报告
+  `slot_bytes=1,073,741,824`、`max_slots=14`、`max_ptes=262,144`。
+- 两台各 17 项 ABI TAP 断言全部通过。
+- VM0 checkpoint/register、VM1 catalog lookup/restore 成功；目标从
+  invocation 17 继续，并证明 shared PMD leaf PFN 和 data PFN。
+- 630 MiB 匿名 footprint checkpoint 成功：
+  161,280 页，image 672,325,632 bytes，页面与 leaf checksum 复核一致。
+- Docker 在两台 guest 均报告 `driver=vfs cgroup=2`。
+- dmesg 无新增 BUG、WARNING 或 Oops。
+
+管理脚本：
+
+- `scripts/paper-system/00-create-paper-images.sh`
+- `scripts/paper-system/10-start-paper-vms.sh`
+- `scripts/paper-system/11-stop-paper-vms.sh`
+- `scripts/paper-system/20-provision-paper-guests.sh`
+
+原始日志：
+
+- 远端：`results/paper-system/20260724-paper-vm/acceptance.log`
+- 本地跳板机备份：
+  `remote-backup-20260724/paper-system/paper-vm/acceptance.log`
