@@ -1,0 +1,77 @@
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2201' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2201' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2201' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+round=0 verify=ok
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+round=1 verify=ok
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+round=2 verify=ok
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+round=3 verify=ok
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+round=4 verify=ok
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+round=5 verify=ok
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+round=6 verify=ok
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+round=7 verify=ok
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+round=8 verify=ok
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+Warning: Permanently added '[localhost]:2200' (ED25519) to the list of known hosts.
+round=9 verify=ok
+CXLFORK_LITMUS_OK rounds=10 iterations=100000

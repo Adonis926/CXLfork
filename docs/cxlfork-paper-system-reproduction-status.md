@@ -106,3 +106,37 @@ cookie/checksum 和独占统计。
 
 - 远端：`results/paper-system/20260724-v4/`
 - 本地跳板机备份：`remote-backup-20260724/paper-system/v4/`
+
+### S2：跨 VM capsule catalog
+
+状态：通过。kernel 提交：`2aa0cee8d`。
+
+实现内容：
+
+- 在 slot 之前的共享 CXL superblock 区建立 64-entry 有界 catalog。
+- catalog identity 为 `(owner, function, version)`，记录 runtime/image digest、
+  slot key/generation、image bytes、page/state checksum 和 restore policy。
+- 新增严格 V4 `CATALOG_REGISTER/LOOKUP/EVICT` ioctl。
+- 逐 entry 使用 `FREE -> WRITING -> READY` CAS 与 release/acquire 发布；
+  查找会二次验证 state/catalog generation，避免读取半写 entry。
+- lookup 还会验证底层 slot generation；slot 已释放或复用时返回 `ESTALE`。
+- 这是有界科研 catalog，不宣称生产级分布式目录或故障恢复 allocator。
+
+前置门槛：
+
+- 在当前 #86/#87 QEMU/KVM shared backend 重新运行独立 litmus：
+  10 轮、每轮 100,000 次跨 VM RMW/message/ping-pong，全部通过。
+
+验收结果：
+
+- VM0 register 后 VM1 lookup 得到相同 key、slot generation、digest 和 checksum。
+- 两 VM 同时注册同一 identity，恰好一方成功，另一方返回 `EEXIST`。
+- VM1 evict 后 VM0 lookup 返回 `ENOENT`。
+- slot release 后保留的 catalog entry lookup 返回 `ESTALE`。
+- 错误 catalog generation 的 evict 返回 `ESTALE`，且不破坏正确 entry。
+- capsule V4 continuation、ABI TAP 与 dmesg 回归通过。
+
+原始日志：
+
+- 远端：`results/paper-system/20260724-catalog/`
+- 本地跳板机备份：`remote-backup-20260724/paper-system/catalog/`
