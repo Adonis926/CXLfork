@@ -232,3 +232,64 @@ cookie/checksum 和独占统计。
 - 远端：`results/paper-system/20260724-cxlp2-ghost/smoke.log`
 - 本地跳板机备份：
   `remote-backup-20260724/paper-system/cxlp2-ghost/smoke.log`
+
+### S5：OpenWhisk 源码级 CXLP/2 集成
+
+状态：通过。OpenWhisk 本地分支提交：`8fde5944`；可重放 patch 与脚本的
+cxlporter 提交：`2c50456`。
+
+实现内容：
+
+- OpenWhisk 固定在上游提交
+  `7ef091c12714b40d5dd93ff1488b086f0cebf3f8`，独立源码仓库分支为
+  `cxlfork-paper-system-reproduction`。
+- 在 invoker 中实现真实 `CxlporterContainer`。带 `cxlfork=true` 及
+  owner/function/version annotation 的 executable action 不再运行其
+  JavaScript 占位函数，而是直接发送 CXLP/2 ACTIVATE。
+- OpenWhisk activation ID 映射为 CXLP/2 request ID；结果中保留
+  OpenWhisk adapter、daemon、Unix IPC、agent、fork-to-exit 和 kernel
+  restore 各层原始区间，以及完整 runtime proof。
+- annotated action 明确跳过普通 runtime prewarm。初次验收曾证明仅在
+  factory 中加分支不够：预热容器会在 factory 收到具体 action 前截获
+  请求；最终在 `ContainerPool.takePrewarmContainer()` 对该 annotation
+  返回 `None`，普通 action 不受影响。
+- 配置默认 `enabled=false`，只有 Paper standalone 显式设置
+  `CXLPORTER_ENABLED=true` 时启用。
+- OpenWhisk 上游仓库不是本项目可推送仓库，因此把完整提交导出为
+  `cxlporter/openwhisk/patches/0001-...patch`；构建脚本会验证固定 commit、
+  patch 状态、JDK/Node 版本、focused 单测和产物哈希。
+
+验收结果：
+
+- 固定源码在 JDK 11、Gradle 6.9.1 下通过 invoker/standalone Scala
+  编译、scalafmt 检查和 bootJar。
+- 7 项 CXLP/2 focused ScalaTest 全部通过，覆盖 request ID、成功、
+  远端错误、缺失字段、legacy 协议、超长响应和非法 proof hex。
+- 从干净 standalone 状态连续执行两次 annotated action，二者均：
+  - `openwhisk_source_integrated=true`、`status=0`、`verify=1`；
+  - 经 hostfwd、VM1 daemon、Docker ghost、fork/exec 到内核
+    `RESUME_CAPSULE_V4`；
+  - 证明 shared leaf/data PFN、fd 关闭后的 context 生命周期和
+    invocation 17 continuation。
+- 本轮两次功能验收样本的 OpenWhisk adapter 区间约 13.13 ms 和
+  8.32 ms；daemon 区间约 9.64 ms 和 7.21 ms；kernel restore 约
+  23.0 us 和 9.7 us。它们只用于路径验收，不作为统计结论。
+- 缺失 catalog identity 通过 OpenWhisk application error 返回
+  `status=-2`、`verify=0`，没有 fork child。
+- 未标注 action 返回真实 Node.js workload 结果；annotated action 日志
+  中不存在普通 `DockerContainer` 的 `sending arguments` 记录。
+- VM0/VM1 完整 dmesg 已保存，错误筛选文件为空。
+
+管理脚本：
+
+- `cxlporter/openwhisk/scripts/50-build-paper-source.sh`
+- `cxlporter/openwhisk/scripts/51-start-paper-source.sh`
+- `cxlporter/openwhisk/scripts/52-stop-paper-source.sh`
+- `cxlporter/openwhisk/scripts/53-deploy-paper-source-action.sh`
+- `cxlporter/openwhisk/scripts/54-smoke-paper-source.sh`
+
+原始日志：
+
+- 远端：`results/paper-system/20260724-064504-openwhisk-source/`
+- 本地跳板机备份：
+  `remote-backup-20260724/paper-system/openwhisk-source/`
