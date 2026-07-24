@@ -1,0 +1,2 @@
+capsule-k0 event=shared-leaf-proof key=2026072404 generation=289 shared_leaf_pfn=5522971 current_pmd_pfn=5522971 shared_pfn=5521936 current_pfn=5521936 verify=ok
+capsule-k0 event=target-continued source_pid=282040 target_pid=132412 source_inits=1 invocation=17 source_sp=00004800003fffc8 target_sp=00004800003fffc8 checksum=f9d4317634aeef87 markers=ok verify=ok

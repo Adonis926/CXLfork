@@ -1,0 +1,1 @@
+capsule-k0 event=source-prepared key=2026072403 source_pid=281752 source_inits=1 invocation=16 continuation_sp=00004800003fffa8 continuation_ip=00000000004014d7 cookie=9efd71e3637e5a9d checksum=8e82483f8dff7986 pages=1024 cookie_state=corrupt-for-negative-test verify=ok

@@ -27,18 +27,18 @@
 
 ### S0：分支与基线冻结
 
-状态：进行中。
+状态：通过。
 
 验收项：
 
 - [x] 三个仓库从已验证提交创建同名专用分支。
 - [x] 三个专用分支推送到远端。
 - [x] 原始开发分支没有被直接修改。
-- [ ] 主仓库提交本冻结记录和子模块跟踪配置。
+- [x] 主仓库提交本冻结记录和子模块跟踪配置（`8dc820e`）。
 
 ### K0：函数胶囊 continuation 可行性
 
-状态：未开始。
+状态：通过。kernel 提交：`d37dde36d`。
 
 硬验收：
 
@@ -48,4 +48,25 @@
 4. VM1 从 yield 之后继续 invocation 17；不得重新运行 1--16 或重新初始化状态。
 5. 输出 continuation cookie、业务状态 checksum、恢复前后栈地址和 CXLfork inspect/PFN 证据。
 6. 同时覆盖错误 key、地址冲突或损坏 cookie 的失败路径，并检查 dmesg。
+
+验收结果：
+
+- VM0 完成 invocation 1--16，checkpoint 4 MiB、1,024 页的 PMD 对齐匿名 arena。
+- VM1 的 PID 与源 PID 不同，但 `source_initializations=1`，并从同一保存栈继续 invocation 17。
+- continuation 保存和恢复了 `RSP/RIP` 与 `R12--R15` 等 callee-saved 寄存器；固定寄存器标记全部匹配。
+- trampoline 在首次修改 arena 前通过 `INSPECT_V2` 证明
+  `current_pmd_pfn == shared_leaf_pfn`，且 `current_pfn == shared_pfn`。
+- 已验证已有地址映射时返回 `EEXIST`，随后正常 restore 仍成功，说明失败回滚未破坏 slot。
+- 已验证损坏 continuation cookie 后目标 trampoline 以状态 93 拒绝执行。
+- 已验证不存在的 key 返回 `ENOENT`。
+- VM0/VM1 的本轮 dmesg 中没有新增 CXLfork、BUG、WARNING 或 Oops。
+
+说明：K0 有意使用 legacy `USER_THREAD_STATE` 指定本地 trampoline，因为 V2 尚不能原子提交
+continuation manifest。它只用于证明该机制可行；正式接口将在 V4 中携带 generation、运行时身份、
+cookie/checksum 和独占统计。
+
+原始日志：
+
+- 远端：`results/paper-system/20260724-k0/`
+- 本地跳板机备份：`remote-backup-20260724/paper-system/k0/`
 
