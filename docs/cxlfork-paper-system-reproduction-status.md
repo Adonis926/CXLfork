@@ -293,3 +293,66 @@ cxlporter 提交：`2c50456`。
 - 远端：`results/paper-system/20260724-064504-openwhisk-source/`
 - 本地跳板机备份：
   `remote-backup-20260724/paper-system/openwhisk-source/`
+
+### S6：OpenWhisk 主路径性能与测量收口
+
+状态：通过。cxlporter 提交：`9d36fa7`、`7f929f7`、`7ad9534`、
+`0aae499`。
+
+实现内容：
+
+- 新增 direct CXLP/2 与完整 OpenWhisk 源码路径的统一逐样本采集器，
+  正式场景均使用 1,000 个样本并报告 mean/P50/P95/P99/标准差。
+- 将嵌套 interval 转换为逐样本严格守恒的 exclusive breakdown；
+  分项之和必须等于 client total，否则样本直接失败。
+- OpenWhisk action 使用 `logsize=0`，避免普通 Docker log store 对
+  逻辑 `CxlporterContainer` 执行不存在的 `docker logs` 并将其误判失效。
+- OpenWhisk 入口并发上限设为 128，高于负载发生器的 64；action 使用
+  128 MiB 实验记账。ghost 从串行 accept 改为 16-worker 固定池，
+  每次 activation 仍创建独立 capsule 子进程。
+- 结果收口增加本轮 OpenWhisk 日志、HTTP 429/容器生命周期错误筛选、
+  slot reader、ghost 进程、dmesg 和不自包含的 SHA-256 清单检查。
+
+正式结果（每行 1,000/1,000 成功）：
+
+| 场景 | 实际吞吐 | mean | P50 | P95 | P99 | kernel restore mean |
+|---|---:|---:|---:|---:|---:|---:|
+| direct-sequential | 94.30 RPS | 10.472 ms | 10.579 ms | 11.587 ms | 11.746 ms | 15.652 us |
+| openwhisk-sequential | 59.52 RPS | 16.648 ms | 16.201 ms | 20.558 ms | 22.779 ms | 16.750 us |
+| direct-150rps | 149.77 RPS | 19.294 ms | 20.564 ms | 23.988 ms | 28.863 ms | 21.459 us |
+| openwhisk-150rps | 149.64 RPS | 23.172 ms | 24.643 ms | 28.672 ms | 32.281 ms | 21.987 us |
+
+关键结论：
+
+- kernel restore 只占完整路径平均 `0.095%--0.149%`；共享页和页表状态
+  已经可快速 attach，并不等价于目标执行上下文已经能够直接运行。
+- 顺序 OpenWhisk 相对 direct 下界平均多 `6.176 ms`，150 RPS 下平均多
+  `3.878 ms`。顺序 OpenWhisk 的 `outer_control` 和 adapter 外围平均约
+  `7.010 ms`，而 kernel restore 约 `0.0168 ms`。
+- 150 RPS 下 catalog lookup 和 fork/runtime 出现并发争用，但 direct
+  与 OpenWhisk 都实际维持约 150 RPS，没有 HTTP 429。
+- 4,000 个正式样本均证明 shared leaf/data PFN、fd-close 后 context
+  生命周期和 invocation 17 continuation；`source_initializations=1`，
+  且 4,000 个 restore ID 全部不同。结束后 slot `readers=0`，无遗留
+  capsule/zombie，VM0/VM1 dmesg 错误筛选为空。
+
+首轮 `paper-source-full-20260724` 中 OpenWhisk burst 有 839 个 HTTP
+429，并暴露逻辑容器 Docker 日志误收集问题。该批次原样保留为故障证据，
+不用于最终性能图；修复后正式批次为 `paper-source-full-v2-20260724`。
+
+说明与边界：
+
+- 详细结果见 `docs/cxlfork-paper-openwhisk-benchmark-results.md`。
+- 本轮明确不补造 CRIU-CXL/Mitosis-CXL；它们保持未实现、未测试。
+- 当前结果是固定 4 MiB C capsule、QEMU/KVM 文件 backend 和真实
+  OpenWhisk 源码控制路径，不宣称覆盖原论文十种函数、Azure trace、
+  动态内存压力或真实 CXL hardware 性能。
+
+原始数据：
+
+- 远端正式批次：
+  `results/paper-system/paper-source-full-v2-20260724/`
+- 远端失败证据：
+  `results/paper-system/paper-source-full-20260724/`
+- 本地跳板机备份：
+  `remote-backup-20260724/paper-system/openwhisk-benchmark/`
