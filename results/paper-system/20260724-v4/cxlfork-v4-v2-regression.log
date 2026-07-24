@@ -1,0 +1,1 @@
+v2-fastpath key=2026072432 pages=1024 fast_total_ns=22785 full_total_ns=5930722 fast_validation_ns=347 full_validation_ns=5919831 shared_leaf_ns=2118 fallback_ns=0 upper_pt_ns=1774 verify=ok

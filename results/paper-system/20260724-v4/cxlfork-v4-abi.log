@@ -1,0 +1,38 @@
+TAP version 13
+1..17
+ok 1 - QUERY_CAPS_V2 succeeds
+ok 2 - v2 size and version round trip
+ok 3 - image reconstruction capabilities are explicit
+ok 4 - GET_CALL_STATS_V3 rejects wrong size
+ok 5 - GET_CALL_STATS_V3 rejects v2 ABI version
+ok 6 - GET_CALL_STATS_V3 rejects reserved tail
+ok 7 - INSPECT_CAPSULE_V4 rejects wrong size
+ok 8 - INSPECT_CAPSULE_V4 rejects v3 version
+ok 9 - INSPECT_CAPSULE_V4 rejects reserved tail
+ok 10 - unimplemented paper mechanisms are not advertised
+ok 11 - oversized v2 structure returns EINVAL
+ok 12 - v2 operation rejects nonzero reserved tail
+ok 13 - capability limits are sane
+ok 14 - unknown ABI version returns EPROTONOSUPPORT
+ok 15 - short v2 structure returns EINVAL
+ok 16 - nonzero v2 header reserved field returns EINVAL
+ok 17 - INSPECT rejects an unknown key
+TAP version 13
+1..17
+ok 1 - QUERY_CAPS_V2 succeeds
+ok 2 - v2 size and version round trip
+ok 3 - image reconstruction capabilities are explicit
+ok 4 - GET_CALL_STATS_V3 rejects wrong size
+ok 5 - GET_CALL_STATS_V3 rejects v2 ABI version
+ok 6 - GET_CALL_STATS_V3 rejects reserved tail
+ok 7 - INSPECT_CAPSULE_V4 rejects wrong size
+ok 8 - INSPECT_CAPSULE_V4 rejects v3 version
+ok 9 - INSPECT_CAPSULE_V4 rejects reserved tail
+ok 10 - unimplemented paper mechanisms are not advertised
+ok 11 - oversized v2 structure returns EINVAL
+ok 12 - v2 operation rejects nonzero reserved tail
+ok 13 - capability limits are sane
+ok 14 - unknown ABI version returns EPROTONOSUPPORT
+ok 15 - short v2 structure returns EINVAL
+ok 16 - nonzero v2 header reserved field returns EINVAL
+ok 17 - INSPECT rejects an unknown key

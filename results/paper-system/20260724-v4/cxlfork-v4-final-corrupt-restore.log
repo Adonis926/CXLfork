@@ -1,0 +1,2 @@
+capsule-k0 event=trampoline-validate verify=fail
+corrupt_restore_rc=93

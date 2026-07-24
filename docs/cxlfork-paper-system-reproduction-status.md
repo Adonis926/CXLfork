@@ -70,3 +70,39 @@ cookie/checksum 和独占统计。
 - 远端：`results/paper-system/20260724-k0/`
 - 本地跳板机备份：`remote-backup-20260724/paper-system/k0/`
 
+### S1：Capsule V4 ABI 与 restore fast path
+
+状态：通过。kernel 提交：`5d78fd12b`。
+
+实现内容：
+
+- 新增严格 `size/version/reserved` 校验的
+  `PREPARE_CAPSULE_V4`、`RESUME_CAPSULE_V4`、`INSPECT_CAPSULE_V4`
+  和 `GET_CALL_STATS_V4`。
+- checkpoint 在 READY 发布前原子封存 runtime SHA-256、image SHA-256、
+  context VA、目标 trampoline/activation stack、continuation cookie 和业务状态 checksum。
+- resume 必须匹配 `key+generation+runtime+image`；运行时身份不匹配返回 `ENOEXEC`。
+- 新 capability 只声明 `COOPERATIVE_FUNCTION_CONTINUATION`；
+  `FULL_PRIVATE_STATE` 和真实跨 OS Maple Tree attach 仍不声明。
+- V4 的单次统计满足
+  `total_ns = core.total_ns + capsule_validate_ns + activation_commit_ns`；
+  页 fault/CoW 仍是独立的 restore 后归因，不能重复加到 total。
+- 默认 sealed V4 不逐 PTE/checksum 扫描；`VALIDATE_FULL` 保留 correctness/debug 全量路径。
+- 关闭发起 restore 的 `/dev/cxlfork` fd 后，恢复 VMA 继续持有 context、slot reader
+  和 per-call stats；新 fd 的 `GET_CALL_STATS_V4` 已实测成功。
+
+验收结果（QEMU/KVM 文件模拟 CXL，4 MiB/1,024 页）：
+
+- 同一 checkpoint 的 `VALIDATE_FULL` restore：`9,474,122 ns`。
+- 同一 checkpoint 的 sealed fast restore：`18,700 ns`。
+- 本次样本只用于路径门槛和数量级诊断，不作为正式统计结论。
+- fast/full 两条路径均证明 shared leaf/data PFN，并从 invocation 17 继续执行。
+- V2 fast-path 回归：`fast_total_ns=22,785`、`full_total_ns=5,930,722`，`verify=ok`。
+- VM0/VM1 共 34 项 ABI TAP 正向/反向断言通过。
+- runtime mismatch=`ENOEXEC`、地址冲突=`EEXIST`、损坏 cookie=目标拒绝（exit 93）。
+- kernel build `#86`、selftests build、双 VM 启动和 dmesg 检查通过。
+
+原始日志：
+
+- 远端：`results/paper-system/20260724-v4/`
+- 本地跳板机备份：`remote-backup-20260724/paper-system/v4/`

@@ -1,0 +1,4 @@
+capsule-k0 event=shared-leaf-proof key=2026072431 generation=1 shared_leaf_pfn=5391899 current_pmd_pfn=5391899 shared_pfn=5390864 current_pfn=5390864 verify=ok
+capsule-k0 event=context-after-fd-close key=2026072431 restore_id=3 total_ns=18700 verify=ok
+capsule-k0 event=v4-stats restore_id=3 total_ns=18700 core_ns=17690 capsule_validate_ns=652 activation_commit_ns=358 verify=ok
+capsule-k0 event=target-continued source_pid=1341 target_pid=1346 source_inits=1 invocation=17 source_sp=00004800003fffc8 target_sp=00004800003fffc8 checksum=387545365c338f1c markers=ok verify=ok
