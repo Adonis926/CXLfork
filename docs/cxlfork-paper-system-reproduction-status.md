@@ -189,3 +189,46 @@ cookie/checksum 和独占统计。
 - 远端：`results/paper-system/20260724-paper-vm/acceptance.log`
 - 本地跳板机备份：
   `remote-backup-20260724/paper-system/paper-vm/acceptance.log`
+
+### S4：真实 Docker ghost 与 CXLP/2 激活路径
+
+状态：通过。cxlporter 提交：`530bb91`。
+
+实现内容：
+
+- 保留旧 CXLP/1，新增独立 `cxlporter-paper` CXLP/2 daemon/client。
+- VM1 中运行真实 Docker 容器 `cxlfork-ghost-paper`；容器使用离线
+  `FROM scratch` 镜像和 `--network none`，常驻 agent 是容器 PID1。
+- `/dev/cxlfork` 只通过 Docker `--device` 授权给 ghost 容器。
+  VM1 外层 daemon 以 `ubuntu` 用户运行，实测没有 CXLfork device fd。
+- daemon 经 bind-mounted Unix `SOCK_SEQPACKET` 把 ACTIVATE 交给 agent。
+- agent 在容器内查询共享 catalog，随后 fork/exec 与 VM0 prepare 使用的
+  同一个静态 non-PIE capsule runtime。
+- 返回 daemon、Unix IPC、catalog lookup、fork-to-exit、kernel V4
+  restore 和 agent total 等互不混淆的原始时间戳/区间，并保留 runtime
+  原始证明的十六进制输出。
+
+验收结果：
+
+- host 经 QEMU port forwarding 成功执行 CXLP/2 PING 和 POOL_STATUS。
+- 同一 VM0 checkpoint 经 CXLP/2 连续激活两个不同容器子进程，二者均：
+  - 使用相同 key、slot generation 和 catalog generation；
+  - 证明 shared leaf/data PFN；
+  - 从 invocation 17 继续，`source_initializations=1`；
+  - `child_status=0`、`verify=1`。
+- 两次诊断样本的端到端 daemon 区间约 11.45 ms 和 9.66 ms；
+  其中 kernel V4 restore 分别约 0.183 ms 和 0.020 ms。它们是功能门槛
+  样本，不作为正式统计结论，但已经证明 restore 之外有可观测控制开销。
+- 不存在的 catalog identity 返回 `ENOENT`，不会 fork child。
+- 容器持续运行、device 映射为 `/dev/cxlfork:/dev/cxlfork`；
+  外层 daemon 无 device fd，dmesg 无 BUG、WARNING 或 Oops。
+
+说明文档：
+
+- `cxlporter/docs/paper-cxlp2-ghost.md`
+
+原始日志：
+
+- 远端：`results/paper-system/20260724-cxlp2-ghost/smoke.log`
+- 本地跳板机备份：
+  `remote-backup-20260724/paper-system/cxlp2-ghost/smoke.log`
