@@ -10,7 +10,7 @@ HydraRPC 协议不变，只把 host 共享后端从普通文件换成真实
 这次迁移的是 **HydraRPC + CXLfork + MR 双 VM 主线**，不是另一套
 OpenWhisk paper VM。两套镜像、端口和共享布局不同，不能混用。
 
-截至 2026-08-10 的已完成准备：
+截至 2026-08-10 的迁移和正式测试已经完成：
 
 - 91 的当前 MR VM 已停机，两张源盘通过 `qemu-img check` 和 SHA256；
 - 103 已建立独立源码目录、工作盘和只读 base 盘，没有改旧 HPCA、GVM、
@@ -23,7 +23,12 @@ OpenWhisk paper VM。两套镜像、端口和共享布局不同，不能混用�
   `results/tmpfs-litmus-20260810T075248Z.log`、
   `results/tmpfs-state-binding-20260810T075605Z/` 和
   `results/tmpfs-motivation-smoke-20260810T075659Z/`；
-- 尚未切换或清空 103 的 DAX，尚未产生“真实 CXL 已通过”的结论。
+- `/dev/dax0.0` 的 `[4,12) GiB` 已在独占窗口完成 devdax bring-up、跨 VM
+  atomic/coherence、内核 correctness、3 轮正式 activation、policy/validation/
+  footprint 对照和 200 个 WordCount job；原始数据与结论索引见
+  [mr-cxlfork-real-cxl-103-results-20260810.md](mr-cxlfork-real-cxl-103-results-20260810.md)；
+- 测试结束后两台 QEMU 已停止，DAX 已恢复为原来的 system-ram/kmem，31/31
+  memory blocks online、node2 `MemUsed=0`、临时 ACL 和 active state 均已清理。
 
 103 当前的 `/dev/dax0.0` 是 64 GiB、2 MiB 对齐、target node 2，但审计
 时处于 `system-ram`，31 个 2 GiB memory block 全部 online。它不能直接
@@ -237,7 +242,8 @@ scripts/run-motivation-bench.sh --output-dir="$RESULT" --smoke
 RESULT=/home/xtl/start/hpca-cxlfork/results/motivation-main-$(date -u +%Y%m%dT%H%M%SZ)
 scripts/run-motivation-bench.sh \
   --output-dir="$RESULT" --samples=1000 --warmups=50 --workers=4 \
-  --activation-blocks=1 --modes=persistent,localfork,cxlfork \
+  --activation-blocks=10 \
+  --modes=persistent,localfork,local-prefork,cxlfork-preopen,cxlfork-per-request \
   --template-bytes-list=4194304 --policy=mow --validation=fast
 ```
 

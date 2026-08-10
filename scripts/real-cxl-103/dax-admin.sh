@@ -98,6 +98,19 @@ require_system_ram_removable() {
 	[[ "$used" == 0 ]] || die "node2 is in use: MemUsed=${used}kB"
 }
 
+system_ram_has_offline_blocks() {
+	local blocks=() block
+
+	shopt -s nullglob
+	blocks=(/sys/devices/system/node/node2/memory[0-9]*)
+	shopt -u nullglob
+	[[ ${#blocks[@]} -eq 31 ]] || return 0
+	for block in "${blocks[@]}"; do
+		[[ $(cat "$block/state") == online ]] || return 0
+	done
+	return 1
+}
+
 require_gvm_disabled() {
 	local parameter value
 	for parameter in \
@@ -248,7 +261,12 @@ restore_host() {
 	setfacl -x u:xtl "$DAX_DEV" 2>/dev/null || true
 	if [[ "$original_mode" == system-ram && $(mode) != system-ram ]]; then
 		daxctl reconfigure-device "$DAX_NAME" --mode=system-ram --force
-		daxctl online-memory "$DAX_NAME"
+		# reconfigure-device normally onlines every block itself.  Calling
+		# online-memory again returns nonzero on daxctl 77 and used to abort
+		# state/ACL cleanup even though all 31 blocks were already online.
+		if system_ram_has_offline_blocks; then
+			daxctl online-memory "$DAX_NAME"
+		fi
 	elif [[ "$original_mode" != system-ram && "$original_mode" != devdax ]]; then
 		die "unsupported recorded original mode: $original_mode"
 	fi
