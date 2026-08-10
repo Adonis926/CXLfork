@@ -6,6 +6,7 @@ set -euo pipefail
 # - localfork：普通单机 baseline，不挂 CXL backend，不带 cxlfork cmdline 参数。
 WS=${WS:-/home/xtl/cxlfork/cxlfork-repro}
 QEMU=${QEMU:-qemu-system-x86_64}
+MACHINE=${MACHINE:-q35}
 KERNEL=${KERNEL:-$WS/kernel/build-6.6.32/arch/x86/boot/bzImage}
 CXL_FILE=${CXL_FILE:-/dev/shm/cxl_mem}       # host 上共享给 VM0/VM1 的 CXL 后端文件。
 CXL_BACKEND_SIZE=${CXL_BACKEND_SIZE:-4G}     # QEMU memory-backend-file 大小。
@@ -30,6 +31,13 @@ LOCAL_PORT=${LOCAL_PORT:-2202}
 VM1_CONTROL_HOST=${VM1_CONTROL_HOST:-172.17.0.1}
 VM1_CONTROL_PORT=${VM1_CONTROL_PORT:-2301}
 VM1_GUEST_CONTROL_PORT=${VM1_GUEST_CONTROL_PORT:-7000}
+# 为空时保持 91 上的历史行为。103 profile 会显式固定 CPU、私有 DRAM
+# NUMA 节点和 ivshmem BDF，便于复现与性能解释。
+VM0_HOST_CPUS=${VM0_HOST_CPUS:-}
+VM1_HOST_CPUS=${VM1_HOST_CPUS:-}
+VM_MEMORY_NODE=${VM_MEMORY_NODE:-}
+HYDRA0_PCI_ADDR=${HYDRA0_PCI_ADDR:-}
+HYDRA1_PCI_ADDR=${HYDRA1_PCI_ADDR:-}
 
 mkdir -p "$WS/logs" "$WS/pids" "$WS/sockets"
 
@@ -164,12 +172,47 @@ validate_backend_layout() {
 	fi
 }
 
+hydra0_device="ivshmem-plain,id=hydra-shm0,memdev=hydra0"
+hydra1_device="ivshmem-plain,id=hydra-shm1,memdev=hydra1"
+if [[ -n "$HYDRA0_PCI_ADDR" ]]; then
+	hydra0_device+=",bus=pcie.0,addr=$HYDRA0_PCI_ADDR"
+fi
+if [[ -n "$HYDRA1_PCI_ADDR" ]]; then
+	hydra1_device+=",bus=pcie.0,addr=$HYDRA1_PCI_ADDR"
+fi
+
 hydra_ivshmem_args=(
 	-object "memory-backend-file,id=hydra0,share=on,mem-path=$HYDRA_SHM_FILE,size=$HYDRA_ENDPOINT_SIZE,offset=$hydra_endpoint0_offset"
-	-device "ivshmem-plain,id=hydra-shm0,memdev=hydra0"
+	-device "$hydra0_device"
 	-object "memory-backend-file,id=hydra1,share=on,mem-path=$HYDRA_SHM_FILE,size=$HYDRA_ENDPOINT_SIZE,offset=$hydra_endpoint1_offset"
-	-device "ivshmem-plain,id=hydra-shm1,memdev=hydra1"
+	-device "$hydra1_device"
 )
+
+launch_qemu() {
+	local cpus=$1
+	shift
+	if [[ -n "$cpus" || -n "$VM_MEMORY_NODE" ]]; then
+		command -v numactl >/dev/null || {
+			echo "numactl is required when CPU or memory binding is configured" >&2
+			return 1
+		}
+		local numa_args=()
+		[[ -n "$cpus" ]] && numa_args+=(--physcpubind="$cpus")
+		[[ -n "$VM_MEMORY_NODE" ]] && numa_args+=(--membind="$VM_MEMORY_NODE")
+		numactl "${numa_args[@]}" "$QEMU" "$@"
+	else
+		"$QEMU" "$@"
+	fi
+}
+
+print_affinity() {
+	local name=$1 pidfile=$2
+	local pid
+	pid=$(cat "$pidfile")
+	awk -v name="$name" '
+		/^Cpus_allowed_list:|^Mems_allowed_list:/ { printf "%s %s\n", name, $0 }
+	' "/proc/$pid/status"
+}
 
 start_vm0() {
 	# VM0 是 checkpoint/prepare 端，挂载共享 CXL backend。
@@ -183,9 +226,9 @@ start_vm0() {
 	require_port_free vm0 "$VM0_PORT"
 	ensure_cxl_file
 	ensure_hydra_file
-	"$QEMU" \
+	launch_qemu "$VM0_HOST_CPUS" \
 		-name vm0 \
-		-machine q35,accel=kvm,nvdimm=on \
+		-machine "$MACHINE",accel=kvm,nvdimm=on \
 		-cpu host \
 		-smp "$SMP",sockets=1,cores="$SMP",threads=1 \
 		-m "$MEM",slots=1,maxmem=20G \
@@ -205,6 +248,7 @@ start_vm0() {
 		-pidfile "$pidfile" \
 		-display none \
 		-daemonize
+	print_affinity vm0 "$pidfile"
 	echo "started vm0 pid=$(cat "$pidfile") ssh=localhost:$VM0_PORT hydra=$HYDRA_SHM_FILE"
 }
 
@@ -221,9 +265,9 @@ start_vm1() {
 	require_port_free vm1-control "$VM1_CONTROL_PORT"
 	ensure_cxl_file
 	ensure_hydra_file
-	"$QEMU" \
+	launch_qemu "$VM1_HOST_CPUS" \
 		-name vm1 \
-		-machine q35,accel=kvm,nvdimm=on \
+		-machine "$MACHINE",accel=kvm,nvdimm=on \
 		-cpu host \
 		-smp "$SMP",sockets=1,cores="$SMP",threads=1 \
 		-m "$MEM",slots=1,maxmem=20G \
@@ -243,6 +287,7 @@ start_vm1() {
 		-pidfile "$pidfile" \
 		-display none \
 		-daemonize
+	print_affinity vm1 "$pidfile"
 	echo "started vm1 pid=$(cat "$pidfile") ssh=localhost:$VM1_PORT control=$VM1_CONTROL_HOST:$VM1_CONTROL_PORT hydra=$HYDRA_SHM_FILE"
 }
 
@@ -256,9 +301,9 @@ start_localfork() {
 	require_file "$WS/images/normal-localfork.qcow2"
 	require_file "$WS/cloudinit/vm0-seed.iso"
 	require_port_free localfork "$LOCAL_PORT"
-	"$QEMU" \
+	launch_qemu "${LOCAL_HOST_CPUS:-}" \
 		-name localfork \
-		-machine q35,accel=kvm \
+		-machine "$MACHINE",accel=kvm \
 		-cpu host \
 		-smp "$SMP",sockets=1,cores="$SMP",threads=1 \
 		-m "$MEM" \
@@ -282,10 +327,13 @@ main() {
 	validate_backend_layout
 	case "${1:-all}" in
 		check)
-			printf 'backend_layout_ok cxl=%s offset=%s size=%s hydra=%s offset=%s endpoint_size=%s endpoint1_offset=%s reset=%s\n' \
+			printf 'backend_layout_ok machine=%s qemu=%s cxl=%s offset=%s size=%s hydra=%s offset=%s endpoint_size=%s endpoint1_offset=%s reset=%s vm0_cpus=%s vm1_cpus=%s mem_node=%s hydra_bdfs=%s,%s\n' \
+				"$MACHINE" "$QEMU" \
 				"$CXL_FILE" "$CXL_BACKEND_OFFSET" "$CXL_BACKEND_SIZE" \
 				"$HYDRA_SHM_FILE" "$HYDRA_BACKEND_OFFSET" \
-				"$HYDRA_ENDPOINT_SIZE" "$HYDRA_ENDPOINT1_OFFSET" "$BACKEND_RESET"
+				"$HYDRA_ENDPOINT_SIZE" "$HYDRA_ENDPOINT1_OFFSET" "$BACKEND_RESET" \
+				"${VM0_HOST_CPUS:-none}" "${VM1_HOST_CPUS:-none}" "${VM_MEMORY_NODE:-none}" \
+				"${HYDRA0_PCI_ADDR:-auto}" "${HYDRA1_PCI_ADDR:-auto}"
 			;;
 		all)
 			start_vm0

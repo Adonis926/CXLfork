@@ -2,6 +2,7 @@
 set -euo pipefail
 
 WS=${WS:-/home/xtl/cxlfork/cxlfork-repro}
+QEMU=${QEMU:-qemu-system-x86_64}
 KERNEL=${KERNEL:-$WS/kernel/linux-6.6.32}
 KBUILD=${KBUILD:-$WS/kernel/build-6.6.32}
 VM0_PORT=${VM0_PORT:-2200}
@@ -12,6 +13,9 @@ TIMEOUT_MS=${TIMEOUT_MS:-30000}
 REMOTE_BIN=${REMOTE_BIN:-/tmp/cxlfork_litmus}
 OUT=${OUT:-/tmp/cxlfork_litmus.log}
 SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
+if [[ -n ${SSH_KEY:-} ]]; then
+	SSH_OPTS+=(-o IdentitiesOnly=yes -i "$SSH_KEY")
+fi
 
 vm_ssh() {
 	local port=$1
@@ -73,7 +77,7 @@ main() {
 	{
 		echo "host_kernel=$(uname -r)"
 		echo "host_cpu=$(LC_ALL=C lscpu | awk -F: '/Model name/ { sub(/^[[:space:]]+/, "", $2); print $2; exit }')"
-		qemu-system-x86_64 --version | head -1
+		"$QEMU" --version | head -1
 		vm_ssh "$VM0_PORT" "uname -a; cat /proc/cmdline"
 		vm_ssh "$VM1_PORT" "uname -a; cat /proc/cmdline"
 	} >>"$OUT"
