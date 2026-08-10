@@ -87,8 +87,8 @@ mkdir -p kernel/build-6.6.32
 cp /home/xtl/start/hpca-cxlfork/kernels/config-6.6.32-cxlfork-91 \
   kernel/build-6.6.32/.config
 make -C kernel/linux-6.6.32 O="$PWD/kernel/build-6.6.32" olddefconfig
-make -C kernel/linux-6.6.32 O="$PWD/kernel/build-6.6.32" \
-  -j16 bzImage headers_install
+make -C kernel/linux-6.6.32 O="$PWD/kernel/build-6.6.32" -j16 bzImage
+make -C kernel/linux-6.6.32 O="$PWD/kernel/build-6.6.32" headers_install
 
 make -C kernel/linux-6.6.32/tools/testing/selftests \
   O="$PWD/kernel/build-6.6.32" TARGETS=cxlfork \
@@ -100,6 +100,12 @@ test -x kernel/build-6.6.32/kselftest/cxlfork/cxlfork_litmus
 
 第一次 bring-up 的 profile 使用从 91 校验过的 `bzImage`；本机构建用于证明
 源码可复现，并生成 MR 编译所需的权威 UAPI header。二者必须记录 SHA256。
+
+原 Git baseline 导入受 Linux `.gitignore` 影响，漏跟踪了三个本来属于
+Linux 6.6.32 源码的 linker-script 文件；它们在 91 的源目录中存在。103
+首次 clean clone 构建发现此问题后，kernel 提交 `a5f3d70b1` 把三个原文件
+纳入 Git，未改变 CXLfork 语义。`bzImage` 与 `headers_install` 分成两条命令，
+避免把两个顶层目标混在同一次并行 make 中。
 
 ## 6. 独占窗口中的手工流程
 
