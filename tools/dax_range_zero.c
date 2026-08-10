@@ -143,8 +143,18 @@ int main(int argc, char **argv)
 		fail("clock_gettime");
 	for (position = 0; position < length; position += chunk)
 		memset(mapping + position, 0, chunk);
-	if (msync(mapping, (size_t)length, MS_SYNC))
-		fail("msync DAX range");
+	/*
+	 * A device-dax character mapping has no page cache to write back.  Some
+	 * kernels therefore reject msync(2) with EINVAL.  MAP_SHARED stores are
+	 * still coherent; retain msync where supported, and use a full barrier
+	 * before the complete read-back verification in either case.
+	 */
+	if (msync(mapping, (size_t)length, MS_SYNC)) {
+		if (errno != EINVAL)
+			fail("msync DAX range");
+		fprintf(stderr, "msync_supported=no errno=EINVAL (device-dax mapping)\n");
+	}
+	__sync_synchronize();
 	if (clock_gettime(CLOCK_MONOTONIC, &zero_end))
 		fail("clock_gettime");
 

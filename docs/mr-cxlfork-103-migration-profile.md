@@ -152,6 +152,9 @@ hash、工作盘、端口和设备持有者。缺少精确确认 token 时它故
 `enter` 先保存原 mode/ACL，再把整个设备切为 devdax，只给 `xtl` 增加设备
 读写 ACL。`zero` 只清零并逐字节验证 `[4,12) GiB`；C 工具锁定设备、几何、
 driver、offset、length 和确认 token，无法用来清空整盘。
+device-dax 没有页缓存，当前 host 对 `msync(MS_SYNC)` 返回 `EINVAL`；工具只
+对这一特定返回值标记 `msync_supported=no`，随后执行 full barrier 和完整
+8 GiB read-back。其他 `msync` 错误仍然失败。
 
 ### 6.3 启动和人工定位
 
