@@ -16,6 +16,13 @@ OpenWhisk paper VM。两套镜像、端口和共享布局不同，不能混用�
 - 103 已建立独立源码目录、工作盘和只读 base 盘，没有改旧 HPCA、GVM、
   MR 或 OpenWhisk 工作区；
 - 91 的当前 breakdown 原始数据已备份到 103；
+- 103 clean clone 的 kernel、headers 和 CXLfork selftest 已构建通过；本机
+  `bzImage` SHA256 为 `50e182f51661874085e57a95c12a65ea4b42dfa11633ae21c3aea7795e573fd7`；
+- 在不切 DAX 的普通文件 backend 上，双 VM、固定 BDF、SSH、litmus、应用
+  状态强绑定和 5-sample motivation smoke 均通过。原始结果分别位于
+  `results/tmpfs-litmus-20260810T075248Z.log`、
+  `results/tmpfs-state-binding-20260810T075605Z/` 和
+  `results/tmpfs-motivation-smoke-20260810T075659Z/`；
 - 尚未切换或清空 103 的 DAX，尚未产生“真实 CXL 已通过”的结论。
 
 103 当前的 `/dev/dax0.0` 是 64 GiB、2 MiB 对齐、target node 2，但审计
@@ -53,6 +60,9 @@ OpenWhisk paper VM。两套镜像、端口和共享布局不同，不能混用�
 VM0 和 VM1 各有 16 GiB 私有 DRAM、16 vCPU；二者只共享上表三个 window。
 VM0 固定 host CPU 48–67，VM1 固定 72–91，私有 DRAM 绑定 node1。guest
 仍使用与 91 相同的 `cxl_phys=0x484000000`、`cxl_size=0xfb000000`。
+103 的原生模式 KVM 要求 QEMU 使用 `kernel-irqchip=split,mem-merge=off`，
+guest cmdline 使用 `nox2apic`；这是复用 103 现有可启动 profile 得出的 host
+兼容配置，不是 CXLfork 机制的一部分。
 
 这里是“host CXL-backed DAX + QEMU NVDIMM/ivshmem”。guest 并没有枚举一张
 原生 CXL Type-3 PCI 设备，因此 103/91 延迟差不能全部解释为介质差异；
@@ -158,9 +168,13 @@ ssh -i "$SSH_KEY" -p 2201 -o StrictHostKeyChecking=no ubuntu@localhost
 
 ```bash
 for p in "$(cat pids/vm0.pid)" "$(cat pids/vm1.pid)"; do
-  grep -E '^(Cpus|Mems)_allowed_list' /proc/$p/status
+  grep '^Cpus_allowed_list' /proc/$p/status
+  numastat -p "$p"
 done
 ```
+
+`Mems_allowed_list` 只表示 cgroup/cpuset 允许的节点，不证明 `numactl --membind`
+的实际分配；应以 `numastat -p` 中绝大部分 private DRAM 位于 node1 为准。
 
 在两个 guest 检查：
 

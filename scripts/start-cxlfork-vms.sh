@@ -7,6 +7,7 @@ set -euo pipefail
 WS=${WS:-/home/xtl/cxlfork/cxlfork-repro}
 QEMU=${QEMU:-qemu-system-x86_64}
 MACHINE=${MACHINE:-q35}
+GUEST_APPEND_EXTRA=${GUEST_APPEND_EXTRA:-}
 KERNEL=${KERNEL:-$WS/kernel/build-6.6.32/arch/x86/boot/bzImage}
 CXL_FILE=${CXL_FILE:-/dev/shm/cxl_mem}       # host 上共享给 VM0/VM1 的 CXL 后端文件。
 CXL_BACKEND_SIZE=${CXL_BACKEND_SIZE:-4G}     # QEMU memory-backend-file 大小。
@@ -210,8 +211,9 @@ print_affinity() {
 	local pid
 	pid=$(cat "$pidfile")
 	awk -v name="$name" '
-		/^Cpus_allowed_list:|^Mems_allowed_list:/ { printf "%s %s\n", name, $0 }
+		/^Cpus_allowed_list:/ { printf "%s %s\n", name, $0 }
 	' "/proc/$pid/status"
+	[[ -z "$VM_MEMORY_NODE" ]] || echo "$name requested_memory_node=$VM_MEMORY_NODE (verify allocations with numastat -p $pid)"
 }
 
 start_vm0() {
@@ -238,7 +240,7 @@ start_vm0() {
 		-drive file="$WS/images/vm0.qcow2",if=virtio,cache=writeback,format=qcow2 \
 		-drive file="$WS/cloudinit/vm0-seed.iso",media=cdrom,if=virtio,format=raw,readonly=on \
 		-kernel "$KERNEL" \
-		-append "root=/dev/vda1 rw console=ttyS0 earlyprintk=ttyS0 nokaslr net.ifnames=0 cxlfork.cxl_phys=$CXL_PHYS cxlfork.cxl_size=$CXL_SIZE" \
+		-append "root=/dev/vda1 rw console=ttyS0 earlyprintk=ttyS0 nokaslr net.ifnames=0 cxlfork.cxl_phys=$CXL_PHYS cxlfork.cxl_size=$CXL_SIZE $GUEST_APPEND_EXTRA" \
 		-netdev user,id=mgmt,hostfwd=tcp::"$VM0_PORT"-:22 \
 		-device virtio-net-pci,netdev=mgmt,mac=52:54:00:12:00:01 \
 		-netdev socket,id=data,mcast=230.0.0.1:1234 \
@@ -277,7 +279,7 @@ start_vm1() {
 		-drive file="$WS/images/vm1.qcow2",if=virtio,cache=writeback,format=qcow2 \
 		-drive file="$WS/cloudinit/vm1-seed.iso",media=cdrom,if=virtio,format=raw,readonly=on \
 		-kernel "$KERNEL" \
-		-append "root=/dev/vda1 rw console=ttyS0 earlyprintk=ttyS0 nokaslr net.ifnames=0 cxlfork.cxl_phys=$CXL_PHYS cxlfork.cxl_size=$CXL_SIZE" \
+		-append "root=/dev/vda1 rw console=ttyS0 earlyprintk=ttyS0 nokaslr net.ifnames=0 cxlfork.cxl_phys=$CXL_PHYS cxlfork.cxl_size=$CXL_SIZE $GUEST_APPEND_EXTRA" \
 		-netdev user,id=mgmt,hostfwd=tcp::"$VM1_PORT"-:22,hostfwd=tcp:"$VM1_CONTROL_HOST":"$VM1_CONTROL_PORT"-:"$VM1_GUEST_CONTROL_PORT" \
 		-device virtio-net-pci,netdev=mgmt,mac=52:54:00:12:00:02 \
 		-netdev socket,id=data,mcast=230.0.0.1:1234 \
@@ -310,7 +312,7 @@ start_localfork() {
 		-drive file="$WS/images/normal-localfork.qcow2",if=virtio,cache=writeback,format=qcow2 \
 		-drive file="$WS/cloudinit/vm0-seed.iso",media=cdrom,if=virtio,format=raw,readonly=on \
 		-kernel "$KERNEL" \
-		-append "root=/dev/vda1 rw console=ttyS0 earlyprintk=ttyS0 nokaslr net.ifnames=0" \
+		-append "root=/dev/vda1 rw console=ttyS0 earlyprintk=ttyS0 nokaslr net.ifnames=0 $GUEST_APPEND_EXTRA" \
 		-netdev user,id=mgmt,hostfwd=tcp::"$LOCAL_PORT"-:22 \
 		-device virtio-net-pci,netdev=mgmt,mac=52:54:00:12:00:03 \
 		-serial file:"$WS/logs/local-console.log" \
