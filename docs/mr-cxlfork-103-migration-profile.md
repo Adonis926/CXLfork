@@ -57,6 +57,10 @@ OpenWhisk paper VM。两套镜像、端口和共享布局不同，不能混用�
 | `[10,12 GiB)` | HydraRPC endpoint 1 | ivshmem，固定 BDF `00:03.0` |
 | `[12,64 GiB)` | 不属于本实验 | 不映射、不写入 |
 
+三个 QEMU `memory-backend-file` 均显式设置 `align=2M`。offset 和 size 对齐
+并不等价于 mmap 返回地址对齐；缺少该参数时，QEMU 在 devdax 上会以
+`unable to map backing store: Invalid argument` 拒绝启动。
+
 VM0 和 VM1 各有 16 GiB 私有 DRAM、16 vCPU；二者只共享上表三个 window。
 VM0 固定 host CPU 48–67，VM1 固定 72–91，私有 DRAM 绑定 node1。guest
 仍使用与 91 相同的 `cxl_phys=0x484000000`、`cxl_size=0xfb000000`。

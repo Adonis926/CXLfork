@@ -12,6 +12,7 @@ KERNEL=${KERNEL:-$WS/kernel/build-6.6.32/arch/x86/boot/bzImage}
 CXL_FILE=${CXL_FILE:-/dev/shm/cxl_mem}       # host 上共享给 VM0/VM1 的 CXL 后端文件。
 CXL_BACKEND_SIZE=${CXL_BACKEND_SIZE:-4G}     # QEMU memory-backend-file 大小。
 CXL_BACKEND_OFFSET=${CXL_BACKEND_OFFSET:-0}  # 在真实 DAX 设备中的保留区起点。
+CXL_BACKEND_ALIGN=${CXL_BACKEND_ALIGN:-}     # devdax profile 使用设备要求的 mmap 对齐。
 CXL_PHYS=${CXL_PHYS:-0x484000000}            # guest 内核 ioremap 的物理基址。
 CXL_SIZE=${CXL_SIZE:-0xfb000000}             # guest 内核看到的 CXL window 大小。
 # HydraRPC 文件模拟后端。一个 4 GiB host tmpfs 文件按 offset 划成两个
@@ -21,6 +22,7 @@ HYDRA_SHM_SIZE=${HYDRA_SHM_SIZE:-4G}
 HYDRA_BACKEND_OFFSET=${HYDRA_BACKEND_OFFSET:-0}
 HYDRA_ENDPOINT_SIZE=${HYDRA_ENDPOINT_SIZE:-2G}
 HYDRA_ENDPOINT1_OFFSET=${HYDRA_ENDPOINT1_OFFSET:-2G}
+HYDRA_BACKEND_ALIGN=${HYDRA_BACKEND_ALIGN:-}
 # auto 只会重建普通文件；真实 /dev/dax* 必须显式使用 none，启动脚本绝不
 # 删除、truncate 或清零设备节点。设备清零必须在 VM 停止后由管理员单独完成。
 BACKEND_RESET=${BACKEND_RESET:-auto}
@@ -173,6 +175,15 @@ validate_backend_layout() {
 	fi
 }
 
+cxl_backend="memory-backend-file,id=cxlmem,share=on,mem-path=$CXL_FILE,size=$CXL_BACKEND_SIZE,offset=$CXL_BACKEND_OFFSET"
+[[ -z "$CXL_BACKEND_ALIGN" ]] || cxl_backend+=",align=$CXL_BACKEND_ALIGN"
+hydra0_backend="memory-backend-file,id=hydra0,share=on,mem-path=$HYDRA_SHM_FILE,size=$HYDRA_ENDPOINT_SIZE,offset=$hydra_endpoint0_offset"
+hydra1_backend="memory-backend-file,id=hydra1,share=on,mem-path=$HYDRA_SHM_FILE,size=$HYDRA_ENDPOINT_SIZE,offset=$hydra_endpoint1_offset"
+if [[ -n "$HYDRA_BACKEND_ALIGN" ]]; then
+	hydra0_backend+=",align=$HYDRA_BACKEND_ALIGN"
+	hydra1_backend+=",align=$HYDRA_BACKEND_ALIGN"
+fi
+
 hydra0_device="ivshmem-plain,id=hydra-shm0,memdev=hydra0"
 hydra1_device="ivshmem-plain,id=hydra-shm1,memdev=hydra1"
 if [[ -n "$HYDRA0_PCI_ADDR" ]]; then
@@ -183,9 +194,9 @@ if [[ -n "$HYDRA1_PCI_ADDR" ]]; then
 fi
 
 hydra_ivshmem_args=(
-	-object "memory-backend-file,id=hydra0,share=on,mem-path=$HYDRA_SHM_FILE,size=$HYDRA_ENDPOINT_SIZE,offset=$hydra_endpoint0_offset"
+	-object "$hydra0_backend"
 	-device "$hydra0_device"
-	-object "memory-backend-file,id=hydra1,share=on,mem-path=$HYDRA_SHM_FILE,size=$HYDRA_ENDPOINT_SIZE,offset=$hydra_endpoint1_offset"
+	-object "$hydra1_backend"
 	-device "$hydra1_device"
 )
 
@@ -234,7 +245,7 @@ start_vm0() {
 		-cpu host \
 		-smp "$SMP",sockets=1,cores="$SMP",threads=1 \
 		-m "$MEM",slots=1,maxmem=20G \
-		-object memory-backend-file,id=cxlmem,share=on,mem-path="$CXL_FILE",size="$CXL_BACKEND_SIZE",offset="$CXL_BACKEND_OFFSET" \
+		-object "$cxl_backend" \
 		-device nvdimm,id=cxldev,memdev=cxlmem,label-size=16M \
 		"${hydra_ivshmem_args[@]}" \
 		-drive file="$WS/images/vm0.qcow2",if=virtio,cache=writeback,format=qcow2 \
@@ -273,7 +284,7 @@ start_vm1() {
 		-cpu host \
 		-smp "$SMP",sockets=1,cores="$SMP",threads=1 \
 		-m "$MEM",slots=1,maxmem=20G \
-		-object memory-backend-file,id=cxlmem,share=on,mem-path="$CXL_FILE",size="$CXL_BACKEND_SIZE",offset="$CXL_BACKEND_OFFSET" \
+		-object "$cxl_backend" \
 		-device nvdimm,id=cxldev,memdev=cxlmem,label-size=16M \
 		"${hydra_ivshmem_args[@]}" \
 		-drive file="$WS/images/vm1.qcow2",if=virtio,cache=writeback,format=qcow2 \
@@ -329,11 +340,11 @@ main() {
 	validate_backend_layout
 	case "${1:-all}" in
 		check)
-			printf 'backend_layout_ok machine=%s qemu=%s cxl=%s offset=%s size=%s hydra=%s offset=%s endpoint_size=%s endpoint1_offset=%s reset=%s vm0_cpus=%s vm1_cpus=%s mem_node=%s hydra_bdfs=%s,%s\n' \
+			printf 'backend_layout_ok machine=%s qemu=%s cxl=%s offset=%s size=%s align=%s hydra=%s offset=%s endpoint_size=%s endpoint1_offset=%s align=%s reset=%s vm0_cpus=%s vm1_cpus=%s mem_node=%s hydra_bdfs=%s,%s\n' \
 				"$MACHINE" "$QEMU" \
-				"$CXL_FILE" "$CXL_BACKEND_OFFSET" "$CXL_BACKEND_SIZE" \
+				"$CXL_FILE" "$CXL_BACKEND_OFFSET" "$CXL_BACKEND_SIZE" "${CXL_BACKEND_ALIGN:-default}" \
 				"$HYDRA_SHM_FILE" "$HYDRA_BACKEND_OFFSET" \
-				"$HYDRA_ENDPOINT_SIZE" "$HYDRA_ENDPOINT1_OFFSET" "$BACKEND_RESET" \
+				"$HYDRA_ENDPOINT_SIZE" "$HYDRA_ENDPOINT1_OFFSET" "${HYDRA_BACKEND_ALIGN:-default}" "$BACKEND_RESET" \
 				"${VM0_HOST_CPUS:-none}" "${VM1_HOST_CPUS:-none}" "${VM_MEMORY_NODE:-none}" \
 				"${HYDRA0_PCI_ADDR:-auto}" "${HYDRA1_PCI_ADDR:-auto}"
 			;;
