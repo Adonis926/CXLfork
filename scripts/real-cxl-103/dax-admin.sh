@@ -267,13 +267,18 @@ usage() {
 	exit 2
 }
 
+command=${1:-}
+if [[ "$command" == status ]]; then
+	show_status
+	exit 0
+fi
+
 mkdir -p "$(dirname "$LOCK_FILE")"
 exec 9>"$LOCK_FILE"
 flock -n 9 || die "another dax-admin command is active"
 
-case ${1:-} in
-	status) show_status ;;
-	preflight) run_preflight ;;
+case "$command" in
+	preflight) need_root preflight; run_preflight ;;
 	enter) enter_devdax ;;
 	zero) zero_reserved_range ;;
 	restore) restore_host ;;
