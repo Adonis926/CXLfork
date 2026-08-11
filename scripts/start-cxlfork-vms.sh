@@ -175,6 +175,13 @@ validate_backend_layout() {
 	fi
 }
 
+validate_vcpu_config() {
+	if [[ ! "$SMP" =~ ^[0-9]+$ ]] || (( SMP < 1 )); then
+		echo "SMP must be a positive integer: $SMP" >&2
+		exit 2
+	fi
+}
+
 cxl_backend="memory-backend-file,id=cxlmem,share=on,mem-path=$CXL_FILE,size=$CXL_BACKEND_SIZE,offset=$CXL_BACKEND_OFFSET"
 [[ -z "$CXL_BACKEND_ALIGN" ]] || cxl_backend+=",align=$CXL_BACKEND_ALIGN"
 hydra0_backend="memory-backend-file,id=hydra0,share=on,mem-path=$HYDRA_SHM_FILE,size=$HYDRA_ENDPOINT_SIZE,offset=$hydra_endpoint0_offset"
@@ -262,7 +269,7 @@ start_vm0() {
 		-display none \
 		-daemonize
 	print_affinity vm0 "$pidfile"
-	echo "started vm0 pid=$(cat "$pidfile") ssh=localhost:$VM0_PORT hydra=$HYDRA_SHM_FILE"
+	echo "started vm0 pid=$(cat "$pidfile") vcpus=$SMP ssh=localhost:$VM0_PORT hydra=$HYDRA_SHM_FILE"
 }
 
 start_vm1() {
@@ -301,7 +308,7 @@ start_vm1() {
 		-display none \
 		-daemonize
 	print_affinity vm1 "$pidfile"
-	echo "started vm1 pid=$(cat "$pidfile") ssh=localhost:$VM1_PORT control=$VM1_CONTROL_HOST:$VM1_CONTROL_PORT hydra=$HYDRA_SHM_FILE"
+	echo "started vm1 pid=$(cat "$pidfile") vcpus=$SMP ssh=localhost:$VM1_PORT control=$VM1_CONTROL_HOST:$VM1_CONTROL_PORT hydra=$HYDRA_SHM_FILE"
 }
 
 start_localfork() {
@@ -338,10 +345,12 @@ main() {
 	# 调试时推荐先 cxl，再 localfork，避免 all 一次启动三个 VM 时难以定位失败点。
 	require_file "$KERNEL"
 	validate_backend_layout
+	validate_vcpu_config
 	case "${1:-all}" in
 		check)
-			printf 'backend_layout_ok machine=%s qemu=%s cxl=%s offset=%s size=%s align=%s hydra=%s offset=%s endpoint_size=%s endpoint1_offset=%s align=%s reset=%s vm0_cpus=%s vm1_cpus=%s mem_node=%s hydra_bdfs=%s,%s\n' \
+			printf 'backend_layout_ok machine=%s qemu=%s smp_per_vm=%s total_guest_vcpus=%s cxl=%s offset=%s size=%s align=%s hydra=%s offset=%s endpoint_size=%s endpoint1_offset=%s align=%s reset=%s vm0_cpus=%s vm1_cpus=%s mem_node=%s hydra_bdfs=%s,%s\n' \
 				"$MACHINE" "$QEMU" \
+				"$SMP" "$((2 * SMP))" \
 				"$CXL_FILE" "$CXL_BACKEND_OFFSET" "$CXL_BACKEND_SIZE" "${CXL_BACKEND_ALIGN:-default}" \
 				"$HYDRA_SHM_FILE" "$HYDRA_BACKEND_OFFSET" \
 				"$HYDRA_ENDPOINT_SIZE" "$HYDRA_ENDPOINT1_OFFSET" "${HYDRA_BACKEND_ALIGN:-default}" "$BACKEND_RESET" \
