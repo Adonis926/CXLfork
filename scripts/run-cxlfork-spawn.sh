@@ -328,6 +328,13 @@ metrics = [
     'vma_create_ns', 'upper_pt_alloc_ns', 'shared_leaf_attach_ns',
     'kernel_other_ns']
 
+v3_valid_bits = {
+    'lock_wait_ns': 0, 'lifecycle_ns': 1, 'manifest_validate_ns': 2,
+    'checksum_validate_ns': 4, 'vma_create_ns': 6,
+    'upper_pt_alloc_ns': 7, 'shared_leaf_attach_ns': 8,
+    'kernel_other_ns': 18,
+}
+
 def percentile(values, p):
     values = sorted(values)
     position = (len(values) - 1) * p
@@ -348,6 +355,13 @@ for mode, lanes in groups:
                 'lifecycle_ns', 'manifest_validate_ns', 'checksum_validate_ns',
                 'vma_create_ns', 'upper_pt_alloc_ns', 'shared_leaf_attach_ns',
                 'kernel_other_ns'}:
+            summary.append({'mode': mode, 'lanes': lanes, 'metric': metric,
+                            'n': 0, 'mean': 'NA', 'p50': 'NA', 'p95': 'NA',
+                            'p99': 'NA', 'stddev': 'NA'})
+            continue
+        if (metric in v3_valid_bits and 'kernel_valid_mask' in selected[0] and
+                all(not (int(r['kernel_valid_mask']) &
+                         (1 << v3_valid_bits[metric])) for r in selected)):
             summary.append({'mode': mode, 'lanes': lanes, 'metric': metric,
                             'n': 0, 'mean': 'NA', 'p50': 'NA', 'p95': 'NA',
                             'p99': 'NA', 'stddev': 'NA'})
@@ -435,9 +449,9 @@ main()
 	"$WS/scripts/stop-cxlfork-vms.sh" cxl |
 		tee "$RESULT_DIR/logs/vm-stop.log"
 	vms_started=0
+	log "complete result_dir=$RESULT_DIR"
 	find "$RESULT_DIR" -type f ! -name SHA256SUMS -print0 | sort -z |
 		xargs -0 sha256sum >"$RESULT_DIR/SHA256SUMS"
-	log "complete result_dir=$RESULT_DIR"
 	trap - EXIT INT TERM
 }
 
