@@ -171,8 +171,9 @@ capture_manifest()
 		sha256sum "$KERNEL_IMAGE" "$BENCH"
 		git -C "$WS" rev-parse HEAD
 		git -C "$KERNEL_TREE" rev-parse HEAD
-		git -C "$WS" status --short
-		git -C "$KERNEL_TREE" status --short
+		echo "git_status_scope=tracked-files-only; kselftest ELF files are generated outputs"
+		git -C "$WS" status --short --untracked-files=no
+		git -C "$KERNEL_TREE" status --short --untracked-files=no
 		uname -a
 		lscpu
 		df -h /dev/shm "$WS"
