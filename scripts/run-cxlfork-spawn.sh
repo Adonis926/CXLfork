@@ -450,8 +450,11 @@ main()
 		tee "$RESULT_DIR/logs/vm-stop.log"
 	vms_started=0
 	log "complete result_dir=$RESULT_DIR"
-	find "$RESULT_DIR" -type f ! -name SHA256SUMS -print0 | sort -z |
-		xargs -0 sha256sum >"$RESULT_DIR/SHA256SUMS"
+	(
+		cd "$RESULT_DIR"
+		find . -type f ! -name SHA256SUMS -print0 | sort -z |
+			xargs -0 sha256sum >SHA256SUMS
+	)
 	trap - EXIT INT TERM
 }
 
