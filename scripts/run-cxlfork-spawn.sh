@@ -151,6 +151,7 @@ reset_real_work_images()
 {
 	local source destination temporary expected actual
 
+	mkdir -p "$WS/images"
 	for name in vm0 vm1; do
 		if [[ $name == vm0 ]]; then
 			source=$VM0_BASE_IMAGE
@@ -339,6 +340,9 @@ cleanup()
 		printf '%s failed status=%d result_dir=%s\n' \
 			"$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$status" "$RESULT_DIR" |
 			tee -a "$RESULT_DIR/controller.log" >&2
+	fi
+	if [[ ${EUID:-$(id -u)} -eq 0 && -n ${SUDO_USER:-} && -d $RESULT_DIR ]]; then
+		chown -R "$SUDO_USER":"$(id -gn "$SUDO_USER")" "$RESULT_DIR"
 	fi
 	exit "$status"
 }
