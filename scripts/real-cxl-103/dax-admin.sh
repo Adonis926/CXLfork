@@ -23,6 +23,9 @@ ZERO_BINARY=$RUNTIME_ROOT/bin/dax_range_zero
 # shellcheck source=/dev/null
 source "$PROFILE"
 
+QEMU_SHA256=${QEMU_SHA256:-8ac0439e63ae69d73f82160c529687512b621c94ddf70e4ef8bf6237971036c0}
+KERNEL_SHA256=${KERNEL_SHA256:-ebc389f912a1ba7bbc9556b23fe136845b000eaced9f227398f99edbfcaea0d0}
+
 die() {
 	echo "dax-admin: $*" >&2
 	exit 1
@@ -133,12 +136,21 @@ require_asset() {
 }
 
 require_assets() {
-	require_asset 8ac0439e63ae69d73f82160c529687512b621c94ddf70e4ef8bf6237971036c0 "$QEMU"
-	require_asset ebc389f912a1ba7bbc9556b23fe136845b000eaced9f227398f99edbfcaea0d0 "$KERNEL"
-	require_asset b7b4da0daad273ea3673623afb3875fd03c7f3aa9a1b2c92fde60d57715fd6b0 \
-		"$RUNTIME_ROOT/images/mr-vm0-base.qcow2"
-	require_asset c43e4f0849f4b71d55279fb201cd05a3bcfde252fb96683e348880a9c1f51906 \
-		"$RUNTIME_ROOT/images/mr-vm1-base.qcow2"
+	require_asset "$QEMU_SHA256" "$QEMU"
+	require_asset "$KERNEL_SHA256" "$KERNEL"
+	if [[ -n ${VM0_IMAGE_SHA256:-} ]]; then
+		require_asset "$VM0_IMAGE_SHA256" "$WS/images/vm0.qcow2"
+	fi
+	if [[ -n ${VM1_IMAGE_SHA256:-} ]]; then
+		require_asset "$VM1_IMAGE_SHA256" "$WS/images/vm1.qcow2"
+	fi
+	if [[ -n ${VM0_BASE_IMAGE:-} ]]; then
+		require_asset "$VM0_BASE_IMAGE_SHA256" "$VM0_BASE_IMAGE"
+	fi
+	if [[ -n ${VM1_BASE_IMAGE:-} ]]; then
+		require_asset "$VM1_BASE_IMAGE_SHA256" "$VM1_BASE_IMAGE"
+	fi
+	local image
 	for image in "$WS/images/vm0.qcow2" "$WS/images/vm1.qcow2"; do
 		[[ -r "$image" ]] || die "missing work image: $image"
 		qemu-img check -q "$image" || die "qemu-img check failed: $image"
