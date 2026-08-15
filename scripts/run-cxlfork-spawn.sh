@@ -385,7 +385,8 @@ capture_manifest()
 		echo "date_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 		echo "kernel_image=$KERNEL_IMAGE"
 		sha256sum "$KERNEL_IMAGE" "$BENCH" "$SELFTEST" "$QEMU" \
-			"$WS/images/vm0.qcow2" "$WS/images/vm1.qcow2"
+			"$WS/images/vm0.qcow2" "$WS/images/vm1.qcow2" \
+			"$WS/cloudinit/vm0-seed.iso" "$WS/cloudinit/vm1-seed.iso"
 		printf 'main_git_head='
 		git -C "$WS" rev-parse HEAD
 		printf 'kernel_git_head='

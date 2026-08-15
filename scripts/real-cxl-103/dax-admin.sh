@@ -150,6 +150,12 @@ require_assets() {
 	if [[ -n ${VM1_BASE_IMAGE:-} ]]; then
 		require_asset "$VM1_BASE_IMAGE_SHA256" "$VM1_BASE_IMAGE"
 	fi
+	if [[ -n ${VM0_SEED_SHA256:-} ]]; then
+		require_asset "$VM0_SEED_SHA256" "$WS/cloudinit/vm0-seed.iso"
+	fi
+	if [[ -n ${VM1_SEED_SHA256:-} ]]; then
+		require_asset "$VM1_SEED_SHA256" "$WS/cloudinit/vm1-seed.iso"
+	fi
 	local image
 	for image in "$WS/images/vm0.qcow2" "$WS/images/vm1.qcow2"; do
 		[[ -r "$image" ]] || die "missing work image: $image"
