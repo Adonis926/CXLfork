@@ -1,5 +1,9 @@
 # CXLfork Spawn 专用测试说明
 
+> 103 真实 DAX 的环境、安全步骤和正式 1/4/8/16 lanes 协议见
+> `docs/cxlfork-spawn-real-cxl-103-guide-zh.md`。本文件后半部分的 91 数据仅是
+> file-sim pilot，不能作为真实 CXL 绝对性能。
+
 ## 1. 这项测试回答什么问题
 
 这项测试与 MapReduce、HydraRPC、OpenWhisk 和 CXLporter 无关。它单独考察当前
