@@ -1,5 +1,8 @@
 # CXLfork-spawn：103 真实 CXL 实验指南
 
+> 2026-08-15 的正式结果、核心表格和结论见
+> `docs/cxlfork-spawn-real-cxl-103-results-20260815.md`。
+
 ## 1. 实验目的与边界
 
 本实验把 91 上通过的受限 CXLfork V4 remote-spawn 搬到 103 的真实
