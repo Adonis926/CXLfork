@@ -7,12 +7,14 @@ KERNEL=${KERNEL:-$WS/kernel/linux-6.6.32}
 KBUILD=${KBUILD:-$WS/kernel/build-6.6.32}
 VM0_PORT=${VM0_PORT:-2200}
 VM1_PORT=${VM1_PORT:-2201}
+GUEST_PASSWORD=${GUEST_PASSWORD:-123}
 ROUNDS=${ROUNDS:-10}
 ITERATIONS=${ITERATIONS:-100000}
 TIMEOUT_MS=${TIMEOUT_MS:-30000}
 REMOTE_BIN=${REMOTE_BIN:-/tmp/cxlfork_litmus}
 OUT=${OUT:-/tmp/cxlfork_litmus.log}
-SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
+SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+	-o LogLevel=ERROR -o ConnectTimeout=3)
 if [[ -n ${SSH_KEY:-} ]]; then
 	SSH_OPTS+=(-o IdentitiesOnly=yes -i "$SSH_KEY")
 fi
@@ -20,13 +22,14 @@ fi
 vm_ssh() {
 	local port=$1
 	shift
-	ssh "${SSH_OPTS[@]}" -p "$port" ubuntu@localhost "$@"
+	sshpass -p "$GUEST_PASSWORD" ssh "${SSH_OPTS[@]}" \
+		-p "$port" ubuntu@localhost "$@"
 }
 
 vm_scp() {
 	local port=$1
 	shift
-	scp -P "$port" "${SSH_OPTS[@]}" "$@"
+	sshpass -p "$GUEST_PASSWORD" scp -P "$port" "${SSH_OPTS[@]}" "$@"
 }
 
 field() {

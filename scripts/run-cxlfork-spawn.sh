@@ -318,6 +318,7 @@ cleanup()
 {
 	local status=$?
 	local cleanup_failed=0
+	trap - EXIT INT TERM
 	set +e
 	stop_server
 	if (( slot_ready )); then
@@ -459,6 +460,7 @@ run_atomic_litmus()
 	[[ $CXSP_BACKEND == real-dax-103 ]] || return 0
 	env WS="$WS" QEMU="$QEMU" KBUILD="$BUILD_DIR" \
 		VM0_PORT="$VM0_PORT" VM1_PORT="$VM1_PORT" SSH_KEY="${SSH_KEY:-}" \
+		GUEST_PASSWORD="$GUEST_PASSWORD" \
 		OUT="$RESULT_DIR/gates/cross-vm-litmus.log" \
 		ROUNDS="${LITMUS_ROUNDS:-10}" ITERATIONS="${LITMUS_ITERATIONS:-100000}" \
 		"$WS/scripts/run-cxlfork-litmus.sh"
