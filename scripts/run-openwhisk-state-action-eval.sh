@@ -406,13 +406,13 @@ launch_ssi()
 				HOME=/root USER=root LOGNAME=root LANG=C.UTF-8 TERM=dumb \
 				BOOT_TIMEOUT="$BOOT_TIMEOUT" DISK_PATH="$OWE_SSI_DISK" \
 				GUEST_CPUS="$vcpus" LOCAL_CPUS="$half" MASTER_START=0 SLAVE_START="$half" \
-				GUEST_MEM="$OWE_GUEST_MEMORY" "$launcher" "$vcpus" "$OWE_GUEST_MEMORY"
+				GUEST_MEM="$OWE_GVM_LOCAL_MEMORY" "$launcher" "$vcpus" "$OWE_GVM_LOCAL_MEMORY"
 			;;
 		native-cxl|native-dram)
 			env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
 				HOME=/root USER=root LOGNAME=root LANG=C.UTF-8 TERM=dumb \
 				BOOT_TIMEOUT="$BOOT_TIMEOUT" DISK_PATH="$OWE_SSI_DISK" \
-				"$launcher" "$vcpus" "$OWE_GUEST_MEMORY"
+				"$launcher" "$vcpus" "$OWE_NATIVE_MEMORY"
 			;;
 	esac
 }
@@ -470,6 +470,15 @@ on_signal()
 	exit "$rc"
 }
 
+on_exit()
+{
+	local rc=$?
+	trap - EXIT INT TERM
+	[[ -z $OWN_RUNTIME ]] || cleanup_runtime "$CURRENT_ATTEMPT" || true
+	exit "$rc"
+}
+
+trap on_exit EXIT
 trap 'on_signal 130' INT
 trap 'on_signal 143' TERM
 
@@ -500,7 +509,7 @@ snapshot_dmesg()
 
 run_ssi_attempt()
 {
-	local system=$1 vcpus=$2 rep=$3 attempt=$4 token serial marker fifo nc_pid rc=125
+	local system=$1 vcpus=$2 rep=$3 attempt=$4 token=$5 serial marker fifo nc_pid rc=125
 	CURRENT_ATTEMPT=$attempt; mkdir -p "$attempt"; snapshot_dmesg >"$attempt/dmesg-before.txt"
 	OWN_RUNTIME=ssi
 	if ! launch_ssi "$system" "$vcpus" >"$attempt/launch.log" 2>&1 ||
@@ -643,6 +652,8 @@ create_campaign()
 	{
 		printf 'created_utc=%s\nreps=%s\nsequential_requests=%s\nthroughput_seconds=%s\n' \
 			"$(date -u +%FT%TZ)" "$OWE_REPS" "$OWE_SEQUENTIAL_REQUESTS" "$OWE_THROUGHPUT_SECONDS"
+		printf 'gvm_local_memory=%s\nnative_memory=%s\ncxlfork_vm_memory=%s\n' \
+			"$OWE_GVM_LOCAL_MEMORY" "$OWE_NATIVE_MEMORY" "$OWE_CXL_VM_MEMORY"
 		printf 'jar_sha256=%s\nwsk_sha256=%s\nworkload=%s\nstate_checksum=%s\n' \
 			"$OWE_JAR_SHA256" "$OWE_WSK_SHA256" "$OWE_WORKLOAD" "$OWE_STATE_CHECKSUM"
 		uname -a
