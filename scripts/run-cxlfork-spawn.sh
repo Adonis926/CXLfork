@@ -136,8 +136,8 @@ validate_config()
 			return 2
 		}
 		overlap=$(comm -12 \
-			<(expand_cpu_list "$VM0_HOST_CPUS" | sort -un) \
-			<(expand_cpu_list "$VM1_HOST_CPUS" | sort -un) | head -n 1)
+			<(expand_cpu_list "$VM0_HOST_CPUS" | sort -u) \
+			<(expand_cpu_list "$VM1_HOST_CPUS" | sort -u) | head -n 1)
 		[[ -z $overlap ]] || {
 			echo "VM host CPU lists overlap at CPU $overlap" >&2
 			return 2
