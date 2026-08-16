@@ -39,6 +39,8 @@ VM1_GUEST_CONTROL_PORT=${VM1_GUEST_CONTROL_PORT:-7000}
 VM0_HOST_CPUS=${VM0_HOST_CPUS:-}
 VM1_HOST_CPUS=${VM1_HOST_CPUS:-}
 VM_MEMORY_NODE=${VM_MEMORY_NODE:-}
+VM0_MEMORY_NODE=${VM0_MEMORY_NODE:-$VM_MEMORY_NODE}
+VM1_MEMORY_NODE=${VM1_MEMORY_NODE:-$VM_MEMORY_NODE}
 HYDRA0_PCI_ADDR=${HYDRA0_PCI_ADDR:-}
 HYDRA1_PCI_ADDR=${HYDRA1_PCI_ADDR:-}
 
@@ -209,15 +211,16 @@ hydra_ivshmem_args=(
 
 launch_qemu() {
 	local cpus=$1
-	shift
-	if [[ -n "$cpus" || -n "$VM_MEMORY_NODE" ]]; then
+	local memory_node=$2
+	shift 2
+	if [[ -n "$cpus" || -n "$memory_node" ]]; then
 		command -v numactl >/dev/null || {
 			echo "numactl is required when CPU or memory binding is configured" >&2
 			return 1
 		}
 		local numa_args=()
 		[[ -n "$cpus" ]] && numa_args+=(--physcpubind="$cpus")
-		[[ -n "$VM_MEMORY_NODE" ]] && numa_args+=(--membind="$VM_MEMORY_NODE")
+		[[ -n "$memory_node" ]] && numa_args+=(--membind="$memory_node")
 		numactl "${numa_args[@]}" "$QEMU" "$@"
 	else
 		"$QEMU" "$@"
@@ -225,13 +228,13 @@ launch_qemu() {
 }
 
 print_affinity() {
-	local name=$1 pidfile=$2
+	local name=$1 pidfile=$2 memory_node=$3
 	local pid
 	pid=$(cat "$pidfile")
 	awk -v name="$name" '
 		/^Cpus_allowed_list:/ { printf "%s %s\n", name, $0 }
 	' "/proc/$pid/status"
-	[[ -z "$VM_MEMORY_NODE" ]] || echo "$name requested_memory_node=$VM_MEMORY_NODE (verify allocations with numastat -p $pid)"
+	[[ -z "$memory_node" ]] || echo "$name requested_memory_node=$memory_node (verify allocations with numastat -p $pid)"
 }
 
 start_vm0() {
@@ -246,7 +249,7 @@ start_vm0() {
 	require_port_free vm0 "$VM0_PORT"
 	ensure_cxl_file
 	ensure_hydra_file
-	launch_qemu "$VM0_HOST_CPUS" \
+	launch_qemu "$VM0_HOST_CPUS" "$VM0_MEMORY_NODE" \
 		-name vm0 \
 		-machine "$MACHINE",accel=kvm,nvdimm=on \
 		-cpu host \
@@ -268,7 +271,7 @@ start_vm0() {
 		-pidfile "$pidfile" \
 		-display none \
 		-daemonize
-	print_affinity vm0 "$pidfile"
+	print_affinity vm0 "$pidfile" "$VM0_MEMORY_NODE"
 	echo "started vm0 pid=$(cat "$pidfile") vcpus=$SMP ssh=localhost:$VM0_PORT hydra=$HYDRA_SHM_FILE"
 }
 
@@ -285,7 +288,7 @@ start_vm1() {
 	require_port_free vm1-control "$VM1_CONTROL_PORT"
 	ensure_cxl_file
 	ensure_hydra_file
-	launch_qemu "$VM1_HOST_CPUS" \
+	launch_qemu "$VM1_HOST_CPUS" "$VM1_MEMORY_NODE" \
 		-name vm1 \
 		-machine "$MACHINE",accel=kvm,nvdimm=on \
 		-cpu host \
@@ -307,7 +310,7 @@ start_vm1() {
 		-pidfile "$pidfile" \
 		-display none \
 		-daemonize
-	print_affinity vm1 "$pidfile"
+	print_affinity vm1 "$pidfile" "$VM1_MEMORY_NODE"
 	echo "started vm1 pid=$(cat "$pidfile") vcpus=$SMP ssh=localhost:$VM1_PORT control=$VM1_CONTROL_HOST:$VM1_CONTROL_PORT hydra=$HYDRA_SHM_FILE"
 }
 
@@ -321,7 +324,7 @@ start_localfork() {
 	require_file "$WS/images/normal-localfork.qcow2"
 	require_file "$WS/cloudinit/vm0-seed.iso"
 	require_port_free localfork "$LOCAL_PORT"
-	launch_qemu "${LOCAL_HOST_CPUS:-}" \
+	launch_qemu "${LOCAL_HOST_CPUS:-}" "${LOCAL_MEMORY_NODE:-$VM_MEMORY_NODE}" \
 		-name localfork \
 		-machine "$MACHINE",accel=kvm \
 		-cpu host \
@@ -354,7 +357,8 @@ main() {
 				"$CXL_FILE" "$CXL_BACKEND_OFFSET" "$CXL_BACKEND_SIZE" "${CXL_BACKEND_ALIGN:-default}" \
 				"$HYDRA_SHM_FILE" "$HYDRA_BACKEND_OFFSET" \
 				"$HYDRA_ENDPOINT_SIZE" "$HYDRA_ENDPOINT1_OFFSET" "${HYDRA_BACKEND_ALIGN:-default}" "$BACKEND_RESET" \
-				"${VM0_HOST_CPUS:-none}" "${VM1_HOST_CPUS:-none}" "${VM_MEMORY_NODE:-none}" \
+				"${VM0_HOST_CPUS:-none}" "${VM1_HOST_CPUS:-none}" \
+				"${VM0_MEMORY_NODE:-none},${VM1_MEMORY_NODE:-none}" \
 				"${HYDRA0_PCI_ADDR:-auto}" "${HYDRA1_PCI_ADDR:-auto}"
 			;;
 		all)

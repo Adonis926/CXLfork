@@ -20,6 +20,15 @@ elif [[ $CXSP_BACKEND != file-sim ]]; then
 	exit 2
 fi
 
+# Scale experiments override the real-DAX profile through CXSP_* variables.
+# Keeping the profile defaults intact preserves the accepted 16+16-vCPU run.
+SMP=${CXSP_SMP:-${SMP:-16}}
+VM0_HOST_CPUS=${CXSP_VM0_HOST_CPUS:-${VM0_HOST_CPUS:-}}
+VM1_HOST_CPUS=${CXSP_VM1_HOST_CPUS:-${VM1_HOST_CPUS:-}}
+VM0_MEMORY_NODE=${CXSP_VM0_MEMORY_NODE:-${VM0_MEMORY_NODE:-${VM_MEMORY_NODE:-}}}
+VM1_MEMORY_NODE=${CXSP_VM1_MEMORY_NODE:-${VM1_MEMORY_NODE:-${VM_MEMORY_NODE:-}}}
+export SMP VM0_HOST_CPUS VM1_HOST_CPUS VM0_MEMORY_NODE VM1_MEMORY_NODE
+
 WS=${WS:-/home/xtl/cxlfork/cxlfork-repro}
 KERNEL_TREE=${KERNEL_TREE:-$WS/kernel/linux-6.6.32}
 BUILD_DIR=${BUILD_DIR:-$WS/kernel/build-6.6.32-spawn}
@@ -75,7 +84,12 @@ log()
 
 validate_config()
 {
-	local lanes
+	local lanes count0 count1 overlap
+
+	[[ $SMP =~ ^[1-9][0-9]*$ ]] && (( SMP <= 128 )) || {
+		echo "SMP must be in 1..128: $SMP" >&2
+		return 2
+	}
 
 	[[ $CXSP_PASSES =~ ^[1-9][0-9]*$ ]] || {
 		echo "CXSP_PASSES must be positive: $CXSP_PASSES" >&2
@@ -90,8 +104,8 @@ validate_config()
 		return 2
 	}
 	for lanes in $CXSP_LANES; do
-		[[ $lanes =~ ^[1-9][0-9]*$ ]] && (( lanes <= 16 )) || {
-			echo "each CXSP_LANES value must be in 1..16: $lanes" >&2
+		[[ $lanes =~ ^[1-9][0-9]*$ ]] && (( lanes <= SMP )) || {
+			echo "each CXSP_LANES value must be in 1..SMP ($SMP): $lanes" >&2
 			return 2
 		}
 	done
@@ -99,6 +113,48 @@ validate_config()
 		echo "CXSP_LANES is empty" >&2
 		return 2
 	}
+	if [[ $CXSP_BACKEND == real-dax-103 ]]; then
+		[[ -n $VM0_HOST_CPUS && -n $VM1_HOST_CPUS ]] || {
+			echo "real-DAX scaling requires both host CPU lists" >&2
+			return 2
+		}
+		count0=$(expand_cpu_list "$VM0_HOST_CPUS" | sort -un | wc -l)
+		count1=$(expand_cpu_list "$VM1_HOST_CPUS" | sort -un | wc -l)
+		[[ $count0 -eq $SMP && $count1 -eq $SMP ]] || {
+			echo "host CPU list size must equal SMP=$SMP: vm0=$count0 vm1=$count1" >&2
+			return 2
+		}
+		overlap=$(comm -12 \
+			<(expand_cpu_list "$VM0_HOST_CPUS" | sort -un) \
+			<(expand_cpu_list "$VM1_HOST_CPUS" | sort -un) | head -n 1)
+		[[ -z $overlap ]] || {
+			echo "VM host CPU lists overlap at CPU $overlap" >&2
+			return 2
+		}
+	fi
+}
+
+expand_cpu_list()
+{
+	local list=$1 item begin end cpu
+	local -a items
+
+	IFS=',' read -r -a items <<<"$list"
+	for item in "${items[@]}"; do
+		if [[ $item =~ ^([0-9]+)-([0-9]+)$ ]]; then
+			begin=${BASH_REMATCH[1]}
+			end=${BASH_REMATCH[2]}
+			(( begin <= end )) || return 2
+			for ((cpu = begin; cpu <= end; cpu++)); do
+				echo "$cpu"
+			done
+		elif [[ $item =~ ^[0-9]+$ ]]; then
+			echo "$item"
+		else
+			echo "invalid CPU list item: $item" >&2
+			return 2
+		fi
+	done
 }
 
 save_and_set_governors()
@@ -108,7 +164,12 @@ save_and_set_governors()
 
 	: >"$GOVERNOR_STATE"
 	governors_saved=1
-	for cpu in $(seq 48 79); do
+	for cpu in $(
+		{
+			expand_cpu_list "$VM0_HOST_CPUS"
+			expand_cpu_list "$VM1_HOST_CPUS"
+		} | sort -un
+	); do
 		policy=$(readlink -f "/sys/devices/system/cpu/cpu$cpu/cpufreq" 2>/dev/null || true)
 		[[ -n $policy && -r $policy/scaling_governor ]] || {
 			echo "missing cpufreq policy for pinned CPU $cpu" >&2
@@ -378,6 +439,12 @@ capture_manifest()
 		echo "workload=restricted-cxlfork-v4-remote-spawn"
 		echo "paths=remote-target-local,remote-cxlfork"
 		echo "lanes=$CXSP_LANES"
+		echo "smp_per_vm=$SMP"
+		echo "total_guest_vcpus=$((2 * SMP))"
+		echo "vm0_host_cpus=$VM0_HOST_CPUS"
+		echo "vm1_host_cpus=$VM1_HOST_CPUS"
+		echo "vm0_memory_node=${VM0_MEMORY_NODE:-none}"
+		echo "vm1_memory_node=${VM1_MEMORY_NODE:-none}"
 		echo "passes=$CXSP_PASSES"
 		echo "warmup_seconds=$CXSP_WARMUP_SECONDS"
 		echo "measure_seconds=$CXSP_MEASURE_SECONDS"
@@ -451,7 +518,7 @@ capture_guest_topology()
 		grep -q 'cxlfork.cxl_phys=0x484000000' "$RESULT_DIR/logs/$name-topology.log"
 		grep -q 'cxlfork.cxl_size=0xfb000000' "$RESULT_DIR/logs/$name-topology.log"
 		grep -q '/dev/cxlfork' "$RESULT_DIR/logs/$name-topology.log"
-		grep -qx '16' "$RESULT_DIR/logs/$name-topology.log"
+		grep -qx "$SMP" "$RESULT_DIR/logs/$name-topology.log"
 	done
 }
 
