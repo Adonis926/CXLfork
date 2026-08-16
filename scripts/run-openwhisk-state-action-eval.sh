@@ -107,7 +107,7 @@ preflight_common()
 	local command dax
 	[[ $(hostname -s) == "$OWE_HOST" ]] || die "this profile is restricted to $OWE_HOST"
 	for command in awk bash cp curl daxctl df dmesg find flock fuser grep jq losetup \
-		mount mountpoint nc pgrep qemu-img qemu-nbd sha256sum ss tar timeout umount; do
+		mount mountpoint nc pgrep qemu-img qemu-nbd sha256sum sshpass ss tar timeout umount; do
 		command -v "$command" >/dev/null || die "missing command: $command"
 	done
 	[[ -x $HPCA_KILL && -x $CXLFORK_START && -x $CXLFORK_STOP && -x $DAX_ADMIN ]] ||
@@ -542,8 +542,10 @@ run_ssi_attempt()
 ssh_guest()
 {
 	local port=$1; shift
-	ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
-		-o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -p "$port" ubuntu@127.0.0.1 "$@"
+	sshpass -p "$OWE_GUEST_PASSWORD" ssh -i "$SSH_KEY" \
+		-o BatchMode=no -o PreferredAuthentications=publickey,password \
+		-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+		-o ConnectTimeout=5 -p "$port" ubuntu@127.0.0.1 "$@"
 }
 
 wait_ssh()
