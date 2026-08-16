@@ -231,7 +231,10 @@ provision()
 		cp --reflink=auto --sparse=always "$OWE_SSI_BASE_DISK" "$OWE_SSI_DISK.new"
 		mv "$OWE_SSI_DISK.new" "$OWE_SSI_DISK"
 	fi
-	qemu-img check -q "$OWE_SSI_DISK"
+	[[ $(qemu-img info --output=json "$OWE_SSI_DISK" | jq -r .format) == raw ]] ||
+		die "isolated SSI disk is not raw"
+	[[ $(qemu-img info --output=json "$OWE_SSI_DISK" | jq -r '.["virtual-size"]') -eq 21474836480 ]] ||
+		die "isolated SSI disk is not 20 GiB"
 	install_bundle_raw "$OWE_SSI_DISK" "$OWE_ROOT/staging/openwhisk-state-action-eval"
 
 	local name base
