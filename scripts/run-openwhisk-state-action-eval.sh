@@ -522,7 +522,8 @@ run_ssi_attempt()
 	timeout $((RUN_TIMEOUT + 60)) nc -t -w $((RUN_TIMEOUT + 30)) 127.0.0.1 5555 \
 		<"$fifo" >"$attempt/serial-session.log" 2>&1 &
 	nc_pid=$!; exec 3>"$fifo"; printf '\r' >&3
-	printf 'bash %q guest-standard %q %q %q %q > /root/%q.log 2>&1; rc=$?; sync; echo %s_RC_${rc}__; systemctl poweroff\r' \
+	printf 'env OWE_SEQUENTIAL_REQUESTS=%q OWE_THROUGHPUT_SECONDS=%q bash %q guest-standard %q %q %q %q > /root/%q.log 2>&1; rc=$?; sync; echo %s_RC_${rc}__; systemctl poweroff\r' \
+		"$OWE_SEQUENTIAL_REQUESTS" "$OWE_THROUGHPUT_SECONDS" \
 		"$GUEST_ROOT/run-openwhisk-state-action-eval.sh" "$system" "$vcpus" "$rep" "$token" \
 		"$token" "$marker" >&3
 	if wait_marker "$serial" "$marker"; then
@@ -561,7 +562,8 @@ cxl_sudo()
 
 run_cxl_attempt()
 {
-	local vcpus=$1 rep=$2 attempt=$3 token=$4 half=$((vcpus / 2)) key cpu0 cpu1 rc=0
+	local vcpus=$1 rep=$2 attempt=$3 token=$4 half key cpu0 cpu1 rc=0
+	half=$((vcpus / 2))
 	CURRENT_ATTEMPT=$attempt; mkdir -p "$attempt"; snapshot_dmesg >"$attempt/dmesg-before.txt"
 	key=$((103000000 + vcpus * 100 + rep)); cpu0="48-$((47 + half))"; cpu1="$((48 + half))-$((47 + vcpus))"
 	/home/xtl/start/hpca/load-native-kvm.sh >"$attempt/kvm-load.log" 2>&1
@@ -587,7 +589,7 @@ run_cxl_attempt()
 	cxl_sudo "$OWE_VM1_PORT" 'ip addr flush dev eth1; ip addr add 192.168.250.2/24 dev eth1; ip link set eth1 up'
 	cxl_sudo "$OWE_VM1_PORT" "set -e; pkill -f '[c]xlporter-paper daemon' || true; docker rm -f cxlfork-state-action >/dev/null 2>&1 || true; rm -rf /run/cxlfork-state-action; install -d -m 0777 /run/cxlfork-state-action; cd $GUEST_ROOT; docker build --pull=false -q -f Dockerfile.ghost-state-action -t cxlfork-ghost:state-action-v1 .; docker run -d --name cxlfork-state-action --network none --cpuset-cpus 0-$((half - 1)) --device /dev/cxlfork:/dev/cxlfork -e CXLPORTER_GHOST_WORKERS=$half -v /run/cxlfork-state-action:/run/cxlfork cxlfork-ghost:state-action-v1; for i in \$(seq 1 60); do test -S /run/cxlfork-state-action/ghost.sock && break; sleep 1; done; test -S /run/cxlfork-state-action/ghost.sock; nohup taskset -c 0-$((half - 1)) $GUEST_ROOT/cxlporter-paper daemon 192.168.250.2 $OWE_CXLPORTER_PORT /run/cxlfork-state-action/ghost.sock >/tmp/cxlporter-state-action.log 2>&1 & echo \$! >/tmp/cxlporter-state-action.pid; for i in \$(seq 1 60); do ss -lnt 'sport = :$OWE_CXLPORTER_PORT' | grep -q LISTEN && break; sleep 1; done; ss -lnt 'sport = :$OWE_CXLPORTER_PORT' | grep LISTEN"
 	cxl_sudo "$OWE_VM0_PORT" "$GUEST_ROOT/state-action-capsule prepare $key && $GUEST_ROOT/state-action-capsule catalog-register $key" >"$attempt/prepare.log"
-	ssh_guest "$OWE_VM0_PORT" "sudo bash $GUEST_ROOT/run-openwhisk-state-action-eval.sh guest-cxlfork $vcpus $rep $token" >"$attempt/guest-controller.log" 2>&1 || rc=$?
+	ssh_guest "$OWE_VM0_PORT" "sudo env OWE_SEQUENTIAL_REQUESTS=$OWE_SEQUENTIAL_REQUESTS OWE_THROUGHPUT_SECONDS=$OWE_THROUGHPUT_SECONDS bash $GUEST_ROOT/run-openwhisk-state-action-eval.sh guest-cxlfork $vcpus $rep $token" >"$attempt/guest-controller.log" 2>&1 || rc=$?
 	if ((rc == 0)); then
 		ssh_guest "$OWE_VM0_PORT" "sudo cat /root/$token.tar" >"$attempt/result.tar" || rc=$?
 	fi
@@ -617,7 +619,8 @@ ok_path()
 
 record_ok()
 {
-	local path=$1 attempt=$2 token=$3 vcpus=$4 system=$5 rep=$6 tmp=$path.tmp.$$ accepted
+	local path=$1 attempt=$2 token=$3 vcpus=$4 system=$5 rep=$6 tmp accepted
+	tmp=$path.tmp.$$
 	accepted="$CAMPAIGN/accepted/$(printf '%03d' "$vcpus")/$system/rep-$rep"
 	rm -rf "$accepted"
 	mkdir -p "$(dirname "$accepted")"
