@@ -30,6 +30,7 @@
 
 - SSI：一个全局 OS 拥有 N 个 vCPU；OpenWhisk/JVM/load generator 固定在前 N/2 个 CPU，action 容器固定在后 N/2 个 CPU。
 - CXLfork：VM0 和 VM1 各 N/2 个 vCPU；VM0 运行 OpenWhisk/load generator，VM1 运行 ghost/capsule。
+- 总内存固定为 16 GiB：SSI 单一 OS 16 GiB，CXLfork 两个 VM 各 8 GiB。workload 只触碰 4 MiB，因此不需要旧 UnixBench profile 的 40 GiB guest/约 80 GiB host private HugeTLB 配置。
 - throughput 并发度为 N/2；每轮还运行 200 个 sequential cold 样本。
 - 只有 32 vCPU 的普通 OpenWhisk 额外记录 warm sequential 下界。它不与 CXLfork remote activation 混称为同一种 cold。
 
