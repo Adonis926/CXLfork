@@ -589,10 +589,13 @@ run_cxl_attempt()
 		cleanup_runtime "$attempt" || return 90; return 1;
 	}
 	# Configure the private VM0<->VM1 link and a cpuset-bound target ghost.
-	cxl_sudo "$OWE_VM0_PORT" 'ip addr flush dev eth1; ip addr add 192.168.250.1/24 dev eth1; ip link set eth1 up' || rc=$?
-	cxl_sudo "$OWE_VM1_PORT" 'ip addr flush dev eth1; ip addr add 192.168.250.2/24 dev eth1; ip link set eth1 up' || rc=$?
+	cxl_sudo "$OWE_VM0_PORT" 'ip addr flush dev eth1; ip addr add 192.168.250.1/24 dev eth1; ip link set eth1 up' \
+		>"$attempt/vm0-network-setup.log" 2>&1 || rc=$?
+	cxl_sudo "$OWE_VM1_PORT" 'ip addr flush dev eth1; ip addr add 192.168.250.2/24 dev eth1; ip link set eth1 up' \
+		>"$attempt/vm1-network-setup.log" 2>&1 || rc=$?
 	if ((rc == 0)); then
-		cxl_sudo "$OWE_VM1_PORT" "set -e; pkill -f '[c]xlporter-paper daemon' || true; docker rm -f cxlfork-state-action >/dev/null 2>&1 || true; rm -rf /run/cxlfork-state-action; install -d -m 0777 /run/cxlfork-state-action; cd $GUEST_ROOT; docker build --pull=false -q -f Dockerfile.ghost-state-action -t cxlfork-ghost:state-action-v1 .; docker run -d --name cxlfork-state-action --network none --cpuset-cpus 0-$((half - 1)) --device /dev/cxlfork:/dev/cxlfork -e CXLPORTER_GHOST_WORKERS=$half -v /run/cxlfork-state-action:/run/cxlfork cxlfork-ghost:state-action-v1; for i in \$(seq 1 60); do test -S /run/cxlfork-state-action/ghost.sock && break; sleep 1; done; test -S /run/cxlfork-state-action/ghost.sock; nohup taskset -c 0-$((half - 1)) $GUEST_ROOT/cxlporter-paper daemon 192.168.250.2 $OWE_CXLPORTER_PORT /run/cxlfork-state-action/ghost.sock >/tmp/cxlporter-state-action.log 2>&1 & echo \$! >/tmp/cxlporter-state-action.pid; for i in \$(seq 1 60); do ss -lnt 'sport = :$OWE_CXLPORTER_PORT' | grep -q LISTEN && break; sleep 1; done; ss -lnt 'sport = :$OWE_CXLPORTER_PORT' | grep LISTEN" || rc=$?
+		cxl_sudo "$OWE_VM1_PORT" "set -e; pkill -f '[c]xlporter-paper daemon' || true; docker rm -f cxlfork-state-action >/dev/null 2>&1 || true; rm -rf /run/cxlfork-state-action; install -d -m 0777 /run/cxlfork-state-action; cd $GUEST_ROOT; docker build --pull=false -q -f Dockerfile.ghost-state-action -t cxlfork-ghost:state-action-v1 .; docker run -d --name cxlfork-state-action --network none --cpuset-cpus 0-$((half - 1)) --device /dev/cxlfork:/dev/cxlfork -e CXLPORTER_GHOST_WORKERS=$half -v /run/cxlfork-state-action:/run/cxlfork cxlfork-ghost:state-action-v1; for i in \$(seq 1 60); do test -S /run/cxlfork-state-action/ghost.sock && break; sleep 1; done; test -S /run/cxlfork-state-action/ghost.sock; nohup taskset -c 0-$((half - 1)) $GUEST_ROOT/cxlporter-paper daemon 192.168.250.2 $OWE_CXLPORTER_PORT /run/cxlfork-state-action/ghost.sock >/tmp/cxlporter-state-action.log 2>&1 & echo \$! >/tmp/cxlporter-state-action.pid; for i in \$(seq 1 60); do ss -lnt 'sport = :$OWE_CXLPORTER_PORT' | grep -q LISTEN && break; sleep 1; done; ss -lnt 'sport = :$OWE_CXLPORTER_PORT' | grep LISTEN" \
+			>"$attempt/ghost-setup.log" 2>&1 || rc=$?
 	fi
 	if ((rc == 0)); then
 		cxl_sudo "$OWE_VM0_PORT" "$GUEST_ROOT/state-action-capsule prepare $key && $GUEST_ROOT/state-action-capsule catalog-register $key" >"$attempt/prepare.log" 2>&1 || rc=$?
