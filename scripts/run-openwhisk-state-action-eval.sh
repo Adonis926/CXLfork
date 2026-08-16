@@ -183,13 +183,21 @@ find_free_nbd()
 
 install_bundle_raw()
 {
-	local disk=$1 bundle=$2 loop mount_dir
+	local disk=$1 bundle=$2 loop mount_dir mounted=0
 	mount_dir=$(mktemp -d /run/owe-raw.XXXXXX)
 	loop=$(losetup --find --show -Pf "$disk")
 	trap 'mountpoint -q "$mount_dir" && umount "$mount_dir" || true; losetup -d "$loop" 2>/dev/null || true; rmdir "$mount_dir" 2>/dev/null || true' RETURN
-	for _ in {1..50}; do [[ -b ${loop}p1 ]] && break; sleep .1; done
-	[[ -b ${loop}p1 ]] || die "raw guest partition did not appear"
-	mount "${loop}p1" "$mount_dir"
+	udevadm settle 2>/dev/null || true
+	for _ in {1..50}; do
+		if [[ -b ${loop}p1 ]] && mount "${loop}p1" "$mount_dir" 2>/dev/null; then
+			mounted=1; break
+		fi
+		sleep .1
+	done
+	if ((mounted == 0)); then
+		losetup -d "$loop" 2>/dev/null || true; rmdir "$mount_dir" 2>/dev/null || true
+		die "raw guest partition could not be mounted"
+	fi
 	rm -rf "$mount_dir/root/openwhisk-state-action-eval"
 	cp -a "$bundle" "$mount_dir/root/openwhisk-state-action-eval"
 	sync
@@ -201,14 +209,22 @@ install_bundle_raw()
 
 install_bundle_qcow2()
 {
-	local disk=$1 bundle=$2 nbd mount_dir
+	local disk=$1 bundle=$2 nbd mount_dir mounted=0
 	nbd=$(find_free_nbd) || die "no free nbd device"
 	mount_dir=$(mktemp -d /run/owe-qcow.XXXXXX)
 	qemu-nbd --connect="$nbd" "$disk"
 	trap 'mountpoint -q "$mount_dir" && umount "$mount_dir" || true; qemu-nbd --disconnect "$nbd" >/dev/null 2>&1 || true; rmdir "$mount_dir" 2>/dev/null || true' RETURN
-	for _ in {1..50}; do [[ -b ${nbd}p1 ]] && break; sleep .1; done
-	[[ -b ${nbd}p1 ]] || die "qcow2 guest partition did not appear"
-	mount "${nbd}p1" "$mount_dir"
+	udevadm settle 2>/dev/null || true
+	for _ in {1..50}; do
+		if [[ -b ${nbd}p1 ]] && mount "${nbd}p1" "$mount_dir" 2>/dev/null; then
+			mounted=1; break
+		fi
+		sleep .1
+	done
+	if ((mounted == 0)); then
+		qemu-nbd --disconnect "$nbd" >/dev/null 2>&1 || true; rmdir "$mount_dir" 2>/dev/null || true
+		die "qcow2 guest partition could not be mounted"
+	fi
 	rm -rf "$mount_dir/root/openwhisk-state-action-eval"
 	cp -a "$bundle" "$mount_dir/root/openwhisk-state-action-eval"
 	sync
