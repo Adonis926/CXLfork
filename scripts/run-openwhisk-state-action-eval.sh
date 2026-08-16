@@ -670,6 +670,16 @@ verify_campaign()
 {
 	local frozen requested
 	(cd "$CAMPAIGN/manifest" && sha256sum -c --quiet frozen.sha256) || die "campaign snapshot is corrupt"
+	cmp -s "$0" "$CAMPAIGN/manifest/run-openwhisk-state-action-eval.sh" ||
+		die "current runner differs from the campaign's frozen runner"
+	cmp -s "$PROFILE" "$CAMPAIGN/manifest/profile.env" ||
+		die "current profile differs from the campaign's frozen profile"
+	grep -qx "reps=$OWE_REPS" "$CAMPAIGN/manifest/environment.txt" ||
+		die "OWE_REPS differs from the frozen campaign"
+	grep -qx "sequential_requests=$OWE_SEQUENTIAL_REQUESTS" "$CAMPAIGN/manifest/environment.txt" ||
+		die "OWE_SEQUENTIAL_REQUESTS differs from the frozen campaign"
+	grep -qx "throughput_seconds=$OWE_THROUGHPUT_SECONDS" "$CAMPAIGN/manifest/environment.txt" ||
+		die "OWE_THROUGHPUT_SECONDS differs from the frozen campaign"
 	frozen=$(cat "$CAMPAIGN/manifest/vcpu-order.txt"); requested=$(printf '%s\n' "${SELECTED_VCPUS[@]}")
 	[[ $frozen == "$requested" ]] || die "requested vCPU order differs from frozen campaign"
 }
