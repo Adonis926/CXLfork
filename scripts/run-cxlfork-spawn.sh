@@ -43,6 +43,7 @@ BENCH_PORT=${BENCH_PORT:-7100}
 CXL_FILE=${CXL_FILE:-/dev/shm/cxlfork_spawn_mem}
 HYDRA_SHM_FILE=${HYDRA_SHM_FILE:-/dev/shm/cxlfork_spawn_aux}
 CXSP_LANES=${CXSP_LANES:-${PILOT_LANES:-"1 4 16"}}
+CXSP_MODES=${CXSP_MODES:-"cxlfork local"}
 CXSP_PASSES=${CXSP_PASSES:-${PILOT_PASSES:-3}}
 CXSP_WARMUP_SECONDS=${CXSP_WARMUP_SECONDS:-${PILOT_WARMUP:-2}}
 CXSP_MEASURE_SECONDS=${CXSP_MEASURE_SECONDS:-${PILOT_SECONDS:-5}}
@@ -84,7 +85,7 @@ log()
 
 validate_config()
 {
-	local lanes count0 count1 overlap
+	local lanes mode count0 count1 overlap
 
 	[[ $SMP =~ ^[1-9][0-9]*$ ]] && (( SMP <= 128 )) || {
 		echo "SMP must be in 1..128: $SMP" >&2
@@ -111,6 +112,16 @@ validate_config()
 	done
 	[[ -n $CXSP_LANES ]] || {
 		echo "CXSP_LANES is empty" >&2
+		return 2
+	}
+	for mode in $CXSP_MODES; do
+		[[ $mode == cxlfork || $mode == local ]] || {
+			echo "each CXSP_MODES value must be cxlfork or local: $mode" >&2
+			return 2
+		}
+	done
+	[[ -n $CXSP_MODES ]] || {
+		echo "CXSP_MODES is empty" >&2
 		return 2
 	}
 	if [[ $CXSP_BACKEND == real-dax-103 ]]; then
@@ -437,7 +448,7 @@ capture_manifest()
 		echo "run_id=$RUN_ID"
 		echo "backend=$CXSP_BACKEND"
 		echo "workload=restricted-cxlfork-v4-remote-spawn"
-		echo "paths=remote-target-local,remote-cxlfork"
+		echo "modes=$CXSP_MODES"
 		echo "lanes=$CXSP_LANES"
 		echo "smp_per_vm=$SMP"
 		echo "total_guest_vcpus=$((2 * SMP))"
@@ -609,7 +620,7 @@ run_matrix()
 	local mode lanes pass generation
 
 	for lanes in $CXSP_LANES; do
-		for mode in cxlfork local; do
+		for mode in $CXSP_MODES; do
 			if [[ $mode == cxlfork ]]; then
 				generation=$GENERATION
 			else
