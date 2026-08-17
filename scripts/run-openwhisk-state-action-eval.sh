@@ -118,6 +118,8 @@ preflight_common()
 	done
 	[[ -x $HPCA_KILL && -x $CXLFORK_START && -x $CXLFORK_STOP && -x $DAX_ADMIN ]] ||
 		die "an authoritative launcher is missing"
+	[[ -n ${OWE_CXL_PHYS:-} && -n ${OWE_CXL_SIZE:-} ]] ||
+		die "CXLfork guest physical geometry is not configured"
 	dax=$(daxctl list -d dax0.0 2>/dev/null) || die "cannot inspect dax0.0"
 	grep -q '"mode":"devdax"' <<<"$dax" || die "dax0.0 is not devdax"
 	[[ -z $(qemus) ]] || { qemus >&2; die "QEMU is already active"; }
@@ -609,7 +611,7 @@ run_cxl_attempt()
 		MACHINE='pc-q35-8.2,kernel-irqchip=split,mem-merge=off' GUEST_APPEND_EXTRA=nox2apic \
 		KERNEL=/home/xtl/start/hpca-cxlfork/kernels/bzImage-6.6.32-cxlfork-91 \
 		CXL_FILE=/dev/dax0.0 CXL_BACKEND_OFFSET=4G CXL_BACKEND_SIZE=4G CXL_BACKEND_ALIGN=2M \
-		CXL_PHYS=0x484000000 CXL_SIZE=0xfb000000 HYDRA_SHM_FILE=/dev/dax0.0 \
+		CXL_PHYS="$OWE_CXL_PHYS" CXL_SIZE="$OWE_CXL_SIZE" HYDRA_SHM_FILE=/dev/dax0.0 \
 		HYDRA_SHM_SIZE=12G HYDRA_BACKEND_OFFSET=8G HYDRA_ENDPOINT_SIZE=2G \
 		HYDRA_ENDPOINT1_OFFSET=2G HYDRA_BACKEND_ALIGN=2M BACKEND_RESET=none \
 		MEM="$OWE_CXL_VM_MEMORY" SMP="$half" VM0_HOST_CPUS="$cpu0" VM1_HOST_CPUS="$cpu1" \
