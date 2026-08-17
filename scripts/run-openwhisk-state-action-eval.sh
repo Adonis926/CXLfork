@@ -28,7 +28,12 @@ BOOT_TIMEOUT=${OWE_BOOT_TIMEOUT:-300}
 RUN_TIMEOUT=${OWE_RUN_TIMEOUT:-7200}
 MAX_ATTEMPTS=${OWE_MAX_ATTEMPTS:-3}
 SSH_KEY=/home/xtl/start/hpca-cxlfork/keys/id_ed25519
-declare -a SYSTEMS=(cohort no-tiering starfish native-cxl native-dram cxlfork)
+declare -a ALLOWED_SYSTEMS=(cohort no-tiering starfish native-cxl native-dram cxlfork)
+if [[ -n ${OWE_SYSTEMS:-} ]]; then
+	read -r -a SYSTEMS <<<"$OWE_SYSTEMS"
+else
+	SYSTEMS=("${ALLOWED_SYSTEMS[@]}")
+fi
 declare -a SELECTED_VCPUS=()
 CAMPAIGN=""
 CURRENT_ATTEMPT=""
@@ -64,7 +69,8 @@ Internal guest entry points (do not run on the host):
 
 The run command is resumable.  Set OWE_EXCLUSIVE_CONFIRM=$OWE_EXCLUSIVE_TOKEN
 only after reserving an exclusive KVM/DAX window.  A CAMPAIGN/STOP file pauses
-the controller safely between fresh-boot tuples.
+the controller safely between fresh-boot tuples.  OWE_SYSTEMS may select an
+ordered subset, for example OWE_SYSTEMS=cxlfork for an isolated pilot.
 EOF
 }
 
@@ -138,6 +144,15 @@ preflight_assets()
 
 preflight()
 {
+	local system candidate allowed seen=" "
+	((${#SYSTEMS[@]} > 0)) || die "OWE_SYSTEMS selected no systems"
+	for system in "${SYSTEMS[@]}"; do
+		allowed=0
+		for candidate in "${ALLOWED_SYSTEMS[@]}"; do [[ $system == "$candidate" ]] && allowed=1; done
+		((allowed)) || die "unsupported system in OWE_SYSTEMS: $system"
+		[[ $seen != *" $system "* ]] || die "duplicate system in OWE_SYSTEMS: $system"
+		seen+="$system "
+	done
 	preflight_common
 	preflight_assets
 	printf 'PREFLIGHT_OK host=%s dax=devdax systems=%s vcpus=%s\n' \
@@ -697,7 +712,7 @@ create_campaign()
 
 verify_campaign()
 {
-	local frozen requested
+	local frozen requested frozen_systems requested_systems
 	(cd "$CAMPAIGN/manifest" && sha256sum -c --quiet frozen.sha256) || die "campaign snapshot is corrupt"
 	cmp -s "$0" "$CAMPAIGN/manifest/run-openwhisk-state-action-eval.sh" ||
 		die "current runner differs from the campaign's frozen runner"
@@ -711,6 +726,9 @@ verify_campaign()
 		die "OWE_THROUGHPUT_SECONDS differs from the frozen campaign"
 	frozen=$(cat "$CAMPAIGN/manifest/vcpu-order.txt"); requested=$(printf '%s\n' "${SELECTED_VCPUS[@]}")
 	[[ $frozen == "$requested" ]] || die "requested vCPU order differs from frozen campaign"
+	frozen_systems=$(cat "$CAMPAIGN/manifest/system-order.txt")
+	requested_systems=$(printf '%s\n' "${SYSTEMS[@]}")
+	[[ $frozen_systems == "$requested_systems" ]] || die "OWE_SYSTEMS differs from frozen campaign"
 }
 
 run_tuple()
