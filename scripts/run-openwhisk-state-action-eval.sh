@@ -95,7 +95,11 @@ sha_is()
 
 jdk_manifest()
 {
-	(cd "$1" && find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print $1}')
+	(
+		export LC_ALL=C
+		cd "$1"
+		find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print $1}'
+	)
 }
 
 qemus()
