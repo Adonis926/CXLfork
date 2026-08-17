@@ -28,7 +28,7 @@ BOOT_TIMEOUT=${OWE_BOOT_TIMEOUT:-300}
 RUN_TIMEOUT=${OWE_RUN_TIMEOUT:-7200}
 MAX_ATTEMPTS=${OWE_MAX_ATTEMPTS:-3}
 SSH_KEY=/home/xtl/start/hpca-cxlfork/keys/id_ed25519
-declare -a ALLOWED_SYSTEMS=(cohort no-tiering starfish native-cxl native-dram cxlfork)
+declare -a ALLOWED_SYSTEMS=(cohort no-tiering starfish native-cxl native-dram cxlfork cxlfork-cold)
 if [[ -n ${OWE_SYSTEMS:-} ]]; then
 	read -r -a SYSTEMS <<<"$OWE_SYSTEMS"
 else
@@ -65,7 +65,7 @@ Usage:
 
 Internal guest entry points (do not run on the host):
   $0 guest-standard SYSTEM VCPUS REP TOKEN
-  $0 guest-cxlfork VCPUS REP TOKEN
+  $0 guest-cxlfork cxlfork|cxlfork-cold VCPUS REP TOKEN
 
 The run command is resumable.  Set OWE_EXCLUSIVE_CONFIRM=$OWE_EXCLUSIVE_TOKEN
 only after reserving an exclusive KVM/DAX window.  A CAMPAIGN/STOP file pauses
@@ -387,28 +387,33 @@ guest_standard()
 
 guest_cxlfork()
 {
-	local vcpus=$1 rep=$2 token=$3 target output deploy_start deploy_end
+	local system=$1 vcpus=$2 rep=$3 token=$4 target output deploy_start deploy_end action
+	local -a cold_annotation=()
+	[[ $system == cxlfork || $system == cxlfork-cold ]] || return 2
+	[[ $system == cxlfork-cold ]] && cold_annotation=(--annotation bench-force-cold true)
+	action=state_action_${system//-/_}
 	target="0-$((vcpus / 2 - 1))"
 	guest_verify_bundle "$((vcpus / 2))"
 	output=/root/openwhisk-state-action-results/$token
 	rm -rf "$output"; install -d -m 0755 "$output"
 	guest_start_openwhisk cxlfork "$target" "$target" "$output" 192.168.250.2
 	deploy_start=$(date +%s%N)
-	"$GUEST_ROOT/wsk" -i action update state_action_cxlfork "$GUEST_ROOT/cxlfork-placeholder.js" \
+	"$GUEST_ROOT/wsk" -i action update "$action" "$GUEST_ROOT/cxlfork-placeholder.js" \
 		--kind nodejs:20 --memory 128 --timeout 300000 --logsize 0 --concurrency 1 \
 		--annotation cxlfork true --annotation cxlfork-owner paper \
-		--annotation cxlfork-function state-action --annotation cxlfork-version v1 >/dev/null
+		--annotation cxlfork-function state-action --annotation cxlfork-version v1 \
+		"${cold_annotation[@]}" >/dev/null
 	deploy_end=$(date +%s%N)
 	printf '{"action_deploy_ns":%s}\n' "$((deploy_end - deploy_start))" >"$output/deploy.json"
-	guest_collect cxlfork cxlfork "$vcpus" "$rep" state_action_cxlfork sequential "$target" \
+	guest_collect "$system" "$system" "$vcpus" "$rep" "$action" sequential "$target" \
 		"$output/cold-sequential" --requests "$OWE_SEQUENTIAL_REQUESTS" --concurrency 1
-	guest_collect cxlfork cxlfork "$vcpus" "$rep" state_action_cxlfork throughput "$target" \
+	guest_collect "$system" "$system" "$vcpus" "$rep" "$action" throughput "$target" \
 		"$output/cold-throughput" --duration "$OWE_THROUGHPUT_SECONDS" --concurrency "$((vcpus / 2))"
 	uname -a >"$output/uname.txt"; lscpu >"$output/lscpu.txt"; dmesg >"$output/guest-dmesg.txt"
 	guest_stop_openwhisk
 	tar -C "$(dirname "$output")" -cf "/root/$token.tar" "$token"
 	chmod 0644 "/root/$token.tar"
-	echo "guest_cxlfork_complete token=$token vcpus=$vcpus rep=$rep"
+	echo "guest_cxlfork_complete token=$token system=$system vcpus=$vcpus rep=$rep"
 }
 
 launcher_for()
@@ -533,7 +538,7 @@ validate_result_tar()
 	done
 	[[ $(jq -r .expected_checksum "$attempt/result/$token/cold-sequential/summary.json") == "$OWE_STATE_CHECKSUM" ]]
 	if [[ $(jq -r .vcpus "$attempt/result/$token/cold-sequential/summary.json") -eq $OWE_WARM_REFERENCE_VCPU &&
-	      $(jq -r .system "$attempt/result/$token/cold-sequential/summary.json") != cxlfork ]]; then
+	      $(jq -r .system "$attempt/result/$token/cold-sequential/summary.json") != cxlfork* ]]; then
 		expected=3
 		[[ -s $attempt/result/$token/warm-sequential/summary.json ]]
 	fi
@@ -602,10 +607,12 @@ cxl_sudo()
 
 run_cxl_attempt()
 {
-	local vcpus=$1 rep=$2 attempt=$3 token=$4 half key cpu0 cpu1 rc=0
+	local system=$1 vcpus=$2 rep=$3 attempt=$4 token=$5 half key key_base cpu0 cpu1 rc=0
+	[[ $system == cxlfork || $system == cxlfork-cold ]] || return 2
 	half=$((vcpus / 2))
 	CURRENT_ATTEMPT=$attempt; mkdir -p "$attempt"; snapshot_dmesg >"$attempt/dmesg-before.txt"
-	key=$((103000000 + vcpus * 100 + rep)); cpu0="48-$((47 + half))"; cpu1="$((48 + half))-$((47 + vcpus))"
+	key_base=103000000; [[ $system == cxlfork-cold ]] && key_base=103100000
+	key=$((key_base + vcpus * 100 + rep)); cpu0="48-$((47 + half))"; cpu1="$((48 + half))-$((47 + vcpus))"
 	/home/xtl/start/hpca/load-native-kvm.sh >"$attempt/kvm-load.log" 2>&1
 	OWN_RUNTIME=cxl
 	env PROFILE="$OWE_REAL_CXL_PROFILE" RUNTIME_ROOT=/home/xtl/start/hpca-cxlfork \
@@ -630,21 +637,26 @@ run_cxl_attempt()
 	cxl_sudo "$OWE_VM1_PORT" 'ip addr flush dev eth1; ip addr add 192.168.250.2/24 dev eth1; ip link set eth1 up' \
 		>"$attempt/vm1-network-setup.log" 2>&1 || rc=$?
 	if ((rc == 0)); then
-		cxl_sudo "$OWE_VM1_PORT" "set -e; if test -s /tmp/cxlporter-state-action.pid; then kill \$(cat /tmp/cxlporter-state-action.pid) 2>/dev/null || true; fi; pkill -x cxlporter-paper 2>/dev/null || true; rm -f /tmp/cxlporter-state-action.pid; for i in \$(seq 1 30); do ss -lnt 'sport = :$OWE_CXLPORTER_PORT' | grep -q LISTEN || break; sleep 1; done; ! ss -lnt 'sport = :$OWE_CXLPORTER_PORT' | grep -q LISTEN; docker ps -aq --filter name=cxlfork | xargs -r docker rm -f >/dev/null; rm -rf /run/cxlfork-state-action; install -d -m 0777 /run/cxlfork-state-action; cd $GUEST_ROOT; docker build --pull=false -q -f Dockerfile.ghost-state-action -t cxlfork-ghost:state-action-v1 .; docker run -d --name cxlfork-state-action --network none --cpuset-cpus 0-$((half - 1)) --device /dev/cxlfork:/dev/cxlfork -e CXLPORTER_GHOST_WORKERS=$half -v /run/cxlfork-state-action:/run/cxlfork cxlfork-ghost:state-action-v1; for i in \$(seq 1 60); do test -S /run/cxlfork-state-action/ghost.sock && break; sleep 1; done; test -S /run/cxlfork-state-action/ghost.sock; nohup taskset -c 0-$((half - 1)) $GUEST_ROOT/cxlporter-paper daemon 192.168.250.2 $OWE_CXLPORTER_PORT /run/cxlfork-state-action/ghost.sock >/tmp/cxlporter-state-action.log 2>&1 & echo \$! >/tmp/cxlporter-state-action.pid; for i in \$(seq 1 60); do ss -lnt 'sport = :$OWE_CXLPORTER_PORT' | grep -q LISTEN && break; sleep 1; done; ss -lnt 'sport = :$OWE_CXLPORTER_PORT' | grep LISTEN" \
-			>"$attempt/ghost-setup.log" 2>&1 || rc=$?
+		if [[ $system == cxlfork-cold ]]; then
+			cxl_sudo "$OWE_VM1_PORT" "set -e; if test -s /tmp/cxlporter-state-action.pid; then kill \$(cat /tmp/cxlporter-state-action.pid) 2>/dev/null || true; fi; pkill -x cxlporter-paper 2>/dev/null || true; rm -f /tmp/cxlporter-state-action.pid; for i in \$(seq 1 30); do ss -lnt 'sport = :$OWE_CXLPORTER_PORT' | grep -q LISTEN || break; sleep 1; done; ! ss -lnt 'sport = :$OWE_CXLPORTER_PORT' | grep -q LISTEN; docker ps -aq --filter name=cxlfork | xargs -r docker rm -f >/dev/null; rm -rf /run/cxlfork-state-action /run/cxlfork-state-action-cold; install -d -m 0777 /run/cxlfork-state-action-cold; cd $GUEST_ROOT; docker build --pull=false -q -f Dockerfile.ghost-state-action -t cxlfork-ghost:state-action-v1 .; nohup env CXLPORTER_COLD_GHOST=1 CXLPORTER_COLD_ROOT=/run/cxlfork-state-action-cold CXLPORTER_COLD_IMAGE=cxlfork-ghost:state-action-v1 CXLPORTER_COLD_CPUSET=0-$((half - 1)) taskset -c 0-$((half - 1)) $GUEST_ROOT/cxlporter-paper daemon 192.168.250.2 $OWE_CXLPORTER_PORT /run/cxlfork-state-action-cold/unused.sock >/tmp/cxlporter-state-action.log 2>&1 & echo \$! >/tmp/cxlporter-state-action.pid; for i in \$(seq 1 60); do ss -lnt 'sport = :$OWE_CXLPORTER_PORT' | grep -q LISTEN && break; sleep 1; done; ss -lnt 'sport = :$OWE_CXLPORTER_PORT' | grep LISTEN; grep -q 'cold_ghost=1' /tmp/cxlporter-state-action.log" \
+				>"$attempt/ghost-setup.log" 2>&1 || rc=$?
+		else
+			cxl_sudo "$OWE_VM1_PORT" "set -e; if test -s /tmp/cxlporter-state-action.pid; then kill \$(cat /tmp/cxlporter-state-action.pid) 2>/dev/null || true; fi; pkill -x cxlporter-paper 2>/dev/null || true; rm -f /tmp/cxlporter-state-action.pid; for i in \$(seq 1 30); do ss -lnt 'sport = :$OWE_CXLPORTER_PORT' | grep -q LISTEN || break; sleep 1; done; ! ss -lnt 'sport = :$OWE_CXLPORTER_PORT' | grep -q LISTEN; docker ps -aq --filter name=cxlfork | xargs -r docker rm -f >/dev/null; rm -rf /run/cxlfork-state-action; install -d -m 0777 /run/cxlfork-state-action; cd $GUEST_ROOT; docker build --pull=false -q -f Dockerfile.ghost-state-action -t cxlfork-ghost:state-action-v1 .; docker run -d --name cxlfork-state-action --network none --cpuset-cpus 0-$((half - 1)) --device /dev/cxlfork:/dev/cxlfork -e CXLPORTER_GHOST_WORKERS=$half -v /run/cxlfork-state-action:/run/cxlfork cxlfork-ghost:state-action-v1; for i in \$(seq 1 60); do test -S /run/cxlfork-state-action/ghost.sock && break; sleep 1; done; test -S /run/cxlfork-state-action/ghost.sock; nohup taskset -c 0-$((half - 1)) $GUEST_ROOT/cxlporter-paper daemon 192.168.250.2 $OWE_CXLPORTER_PORT /run/cxlfork-state-action/ghost.sock >/tmp/cxlporter-state-action.log 2>&1 & echo \$! >/tmp/cxlporter-state-action.pid; for i in \$(seq 1 60); do ss -lnt 'sport = :$OWE_CXLPORTER_PORT' | grep -q LISTEN && break; sleep 1; done; ss -lnt 'sport = :$OWE_CXLPORTER_PORT' | grep LISTEN" \
+				>"$attempt/ghost-setup.log" 2>&1 || rc=$?
+		fi
 	fi
 	if ((rc == 0)); then
 		cxl_sudo "$OWE_VM0_PORT" "$GUEST_ROOT/state-action-capsule prepare $key && $GUEST_ROOT/state-action-capsule catalog-register $key" >"$attempt/prepare.log" 2>&1 || rc=$?
 	fi
 	if ((rc == 0)); then
-		ssh_guest "$OWE_VM0_PORT" "sudo env OWE_SEQUENTIAL_REQUESTS=$OWE_SEQUENTIAL_REQUESTS OWE_THROUGHPUT_SECONDS=$OWE_THROUGHPUT_SECONDS bash $GUEST_ROOT/run-openwhisk-state-action-eval.sh guest-cxlfork $vcpus $rep $token" >"$attempt/guest-controller.log" 2>&1 || rc=$?
+		ssh_guest "$OWE_VM0_PORT" "sudo env OWE_SEQUENTIAL_REQUESTS=$OWE_SEQUENTIAL_REQUESTS OWE_THROUGHPUT_SECONDS=$OWE_THROUGHPUT_SECONDS bash $GUEST_ROOT/run-openwhisk-state-action-eval.sh guest-cxlfork $system $vcpus $rep $token" >"$attempt/guest-controller.log" 2>&1 || rc=$?
 	fi
 	if ((rc == 0)); then
 		ssh_guest "$OWE_VM0_PORT" "sudo cat /root/$token.tar" >"$attempt/result.tar" || rc=$?
 	fi
 	cxl_sudo "$OWE_VM0_PORT" "$GUEST_ROOT/state-action-capsule catalog-lookup $key" >"$attempt/catalog-after.log" 2>&1 || rc=1
 	cxl_sudo "$OWE_VM0_PORT" "dmesg" >"$attempt/vm0-dmesg.txt" || true
-	cxl_sudo "$OWE_VM1_PORT" "dmesg; echo ===GHOST===; docker logs cxlfork-state-action; echo ===PORTER===; cat /tmp/cxlporter-state-action.log" >"$attempt/vm1-dmesg-and-services.txt" || true
+	cxl_sudo "$OWE_VM1_PORT" "dmesg; echo ===CONTAINERS===; docker ps -a --filter name=cxlfork; echo ===GHOST===; docker logs cxlfork-state-action 2>&1 || true; echo ===COLD-RUNTIME===; find /run/cxlfork-state-action-cold -mindepth 1 -maxdepth 1 -print 2>/dev/null || true; echo ===PORTER===; cat /tmp/cxlporter-state-action.log" >"$attempt/vm1-dmesg-and-services.txt" || true
 	cxl_sudo "$OWE_VM0_PORT" "$GUEST_ROOT/state-action-capsule catalog-evict $key && $GUEST_ROOT/state-action-capsule release $key" >"$attempt/release.log" 2>&1 || rc=1
 	ssh_guest "$OWE_VM0_PORT" 'sudo systemctl poweroff' >/dev/null 2>&1 || true
 	ssh_guest "$OWE_VM1_PORT" 'sudo systemctl poweroff' >/dev/null 2>&1 || true
@@ -746,8 +758,8 @@ run_tuple()
 	while ((attempts < MAX_ATTEMPTS)); do
 		attempts=$((attempts + 1)); attempt="$base/attempt-$attempts"; token="owe-v${vcpus}-${system}-r${rep}-a${attempts}"
 		log "START vcpu=$vcpus system=$system rep=$rep attempt=$attempts"
-		if [[ $system == cxlfork ]]; then
-			run_cxl_attempt "$vcpus" "$rep" "$attempt" "$token" && rc=0 || rc=$?
+		if [[ $system == cxlfork || $system == cxlfork-cold ]]; then
+			run_cxl_attempt "$system" "$vcpus" "$rep" "$attempt" "$token" && rc=0 || rc=$?
 		else
 			run_ssi_attempt "$system" "$vcpus" "$rep" "$attempt" "$token" && rc=0 || rc=$?
 		fi
@@ -832,7 +844,7 @@ main()
 		status) shift; (($# == 1)) || { usage; return 2; }; status_campaign "$1" ;;
 		summarize) shift; (($# == 1)) || { usage; return 2; }; CAMPAIGN=$1; summarize_campaign ;;
 		guest-standard) shift; (($# == 4)) || { usage; return 2; }; guest_standard "$@" ;;
-		guest-cxlfork) shift; (($# == 3)) || { usage; return 2; }; guest_cxlfork "$@" ;;
+		guest-cxlfork) shift; (($# == 4)) || { usage; return 2; }; guest_cxlfork "$@" ;;
 		*) usage; return 2 ;;
 	esac
 }
