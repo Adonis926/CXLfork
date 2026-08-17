@@ -298,6 +298,9 @@ guest_stop_openwhisk()
 {
 	pkill -f '[o]penwhisk-standalone.*\.jar' 2>/dev/null || true
 	for _ in {1..30}; do pgrep -f '[o]penwhisk-standalone.*\.jar' >/dev/null || break; sleep 1; done
+	if pgrep -f '[o]penwhisk-standalone.*\.jar' >/dev/null; then
+		return 1
+	fi
 	docker ps -aq --filter name=wsk | xargs -r docker rm -f >/dev/null
 	docker ps -aq --filter ancestor=state-action:eval-v1 | xargs -r docker rm -f >/dev/null
 }
@@ -377,7 +380,7 @@ guest_standard()
 	docker inspect state-action:eval-v1 >"$output/docker-image.json"
 	uname -a >"$output/uname.txt"; lscpu >"$output/lscpu.txt"; docker version >"$output/docker-version.txt"
 	dmesg >"$output/guest-dmesg.txt"
-	kill "$(cat "$output/openwhisk.pid")" 2>/dev/null || true
+	guest_stop_openwhisk
 	tar -C "$(dirname "$output")" -cf "/root/$token.tar" "$token"
 	echo "guest_standard_complete token=$token system=$system vcpus=$vcpus rep=$rep"
 }
@@ -402,7 +405,7 @@ guest_cxlfork()
 	guest_collect cxlfork cxlfork "$vcpus" "$rep" state_action_cxlfork throughput "$target" \
 		"$output/cold-throughput" --duration "$OWE_THROUGHPUT_SECONDS" --concurrency "$((vcpus / 2))"
 	uname -a >"$output/uname.txt"; lscpu >"$output/lscpu.txt"; dmesg >"$output/guest-dmesg.txt"
-	kill "$(cat "$output/openwhisk.pid")" 2>/dev/null || true
+	guest_stop_openwhisk
 	tar -C "$(dirname "$output")" -cf "/root/$token.tar" "$token"
 	chmod 0644 "/root/$token.tar"
 	echo "guest_cxlfork_complete token=$token vcpus=$vcpus rep=$rep"
