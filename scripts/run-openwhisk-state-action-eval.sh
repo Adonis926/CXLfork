@@ -794,6 +794,15 @@ run_campaign()
 	done
 	summarize_campaign
 	log "COMPLETE campaign=$CAMPAIGN"
+	write_sha256_manifest
+}
+
+write_sha256_manifest()
+{
+	(
+		cd "$CAMPAIGN"
+		find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum >SHA256SUMS
+	)
 }
 
 summarize_campaign()
@@ -801,10 +810,7 @@ summarize_campaign()
 	local collector=$PORTER/openwhisk/scripts/state_action_benchmark.py
 	[[ -d $CAMPAIGN ]] || die "campaign does not exist: $CAMPAIGN"
 	"$collector" summarize "$CAMPAIGN/accepted" --output "$CAMPAIGN/summary"
-	(
-		cd "$CAMPAIGN"
-		find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum >SHA256SUMS
-	)
+	write_sha256_manifest
 }
 
 status_campaign()
