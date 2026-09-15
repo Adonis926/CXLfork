@@ -28,6 +28,7 @@ HYDRA_BACKEND_ALIGN=${HYDRA_BACKEND_ALIGN:-}
 BACKEND_RESET=${BACKEND_RESET:-auto}
 MEM=${MEM:-16G}
 SMP=${SMP:-16}
+VM_MAXMEM=${VM_MAXMEM:-20G}
 VM0_PORT=${VM0_PORT:-2200}
 VM1_PORT=${VM1_PORT:-2201}
 LOCAL_PORT=${LOCAL_PORT:-2202}
@@ -39,6 +40,9 @@ VM1_GUEST_CONTROL_PORT=${VM1_GUEST_CONTROL_PORT:-7000}
 VM0_HOST_CPUS=${VM0_HOST_CPUS:-}
 VM1_HOST_CPUS=${VM1_HOST_CPUS:-}
 VM_MEMORY_NODE=${VM_MEMORY_NODE:-}
+VM0_MEMORY_NODE=${VM0_MEMORY_NODE:-$VM_MEMORY_NODE}
+VM1_MEMORY_NODE=${VM1_MEMORY_NODE:-$VM_MEMORY_NODE}
+LOCAL_MEMORY_NODE=${LOCAL_MEMORY_NODE:-$VM_MEMORY_NODE}
 HYDRA0_PCI_ADDR=${HYDRA0_PCI_ADDR:-}
 HYDRA1_PCI_ADDR=${HYDRA1_PCI_ADDR:-}
 
@@ -202,15 +206,16 @@ hydra_ivshmem_args=(
 
 launch_qemu() {
 	local cpus=$1
-	shift
-	if [[ -n "$cpus" || -n "$VM_MEMORY_NODE" ]]; then
+	local memory_node=$2
+	shift 2
+	if [[ -n "$cpus" || -n "$memory_node" ]]; then
 		command -v numactl >/dev/null || {
 			echo "numactl is required when CPU or memory binding is configured" >&2
 			return 1
 		}
 		local numa_args=()
 		[[ -n "$cpus" ]] && numa_args+=(--physcpubind="$cpus")
-		[[ -n "$VM_MEMORY_NODE" ]] && numa_args+=(--membind="$VM_MEMORY_NODE")
+		[[ -n "$memory_node" ]] && numa_args+=(--membind="$memory_node")
 		numactl "${numa_args[@]}" "$QEMU" "$@"
 	else
 		"$QEMU" "$@"
@@ -218,13 +223,13 @@ launch_qemu() {
 }
 
 print_affinity() {
-	local name=$1 pidfile=$2
+	local name=$1 pidfile=$2 memory_node=$3
 	local pid
 	pid=$(cat "$pidfile")
 	awk -v name="$name" '
 		/^Cpus_allowed_list:/ { printf "%s %s\n", name, $0 }
 	' "/proc/$pid/status"
-	[[ -z "$VM_MEMORY_NODE" ]] || echo "$name requested_memory_node=$VM_MEMORY_NODE (verify allocations with numastat -p $pid)"
+	[[ -z "$memory_node" ]] || echo "$name requested_memory_node=$memory_node (verify allocations with numastat -p $pid)"
 }
 
 start_vm0() {
@@ -239,12 +244,12 @@ start_vm0() {
 	require_port_free vm0 "$VM0_PORT"
 	ensure_cxl_file
 	ensure_hydra_file
-	launch_qemu "$VM0_HOST_CPUS" \
+	launch_qemu "$VM0_HOST_CPUS" "$VM0_MEMORY_NODE" \
 		-name vm0 \
 		-machine "$MACHINE",accel=kvm,nvdimm=on \
 		-cpu host \
 		-smp "$SMP",sockets=1,cores="$SMP",threads=1 \
-		-m "$MEM",slots=1,maxmem=20G \
+		-m "$MEM",slots=1,maxmem="$VM_MAXMEM" \
 		-object "$cxl_backend" \
 		-device nvdimm,id=cxldev,memdev=cxlmem,label-size=16M \
 		"${hydra_ivshmem_args[@]}" \
@@ -261,7 +266,7 @@ start_vm0() {
 		-pidfile "$pidfile" \
 		-display none \
 		-daemonize
-	print_affinity vm0 "$pidfile"
+	print_affinity vm0 "$pidfile" "$VM0_MEMORY_NODE"
 	echo "started vm0 pid=$(cat "$pidfile") ssh=localhost:$VM0_PORT hydra=$HYDRA_SHM_FILE"
 }
 
@@ -278,12 +283,12 @@ start_vm1() {
 	require_port_free vm1-control "$VM1_CONTROL_PORT"
 	ensure_cxl_file
 	ensure_hydra_file
-	launch_qemu "$VM1_HOST_CPUS" \
+	launch_qemu "$VM1_HOST_CPUS" "$VM1_MEMORY_NODE" \
 		-name vm1 \
 		-machine "$MACHINE",accel=kvm,nvdimm=on \
 		-cpu host \
 		-smp "$SMP",sockets=1,cores="$SMP",threads=1 \
-		-m "$MEM",slots=1,maxmem=20G \
+		-m "$MEM",slots=1,maxmem="$VM_MAXMEM" \
 		-object "$cxl_backend" \
 		-device nvdimm,id=cxldev,memdev=cxlmem,label-size=16M \
 		"${hydra_ivshmem_args[@]}" \
@@ -300,7 +305,7 @@ start_vm1() {
 		-pidfile "$pidfile" \
 		-display none \
 		-daemonize
-	print_affinity vm1 "$pidfile"
+	print_affinity vm1 "$pidfile" "$VM1_MEMORY_NODE"
 	echo "started vm1 pid=$(cat "$pidfile") ssh=localhost:$VM1_PORT control=$VM1_CONTROL_HOST:$VM1_CONTROL_PORT hydra=$HYDRA_SHM_FILE"
 }
 
@@ -314,7 +319,7 @@ start_localfork() {
 	require_file "$WS/images/normal-localfork.qcow2"
 	require_file "$WS/cloudinit/vm0-seed.iso"
 	require_port_free localfork "$LOCAL_PORT"
-	launch_qemu "${LOCAL_HOST_CPUS:-}" \
+	launch_qemu "${LOCAL_HOST_CPUS:-}" "$LOCAL_MEMORY_NODE" \
 		-name localfork \
 		-machine "$MACHINE",accel=kvm \
 		-cpu host \
@@ -340,12 +345,14 @@ main() {
 	validate_backend_layout
 	case "${1:-all}" in
 		check)
-			printf 'backend_layout_ok machine=%s qemu=%s cxl=%s offset=%s size=%s align=%s hydra=%s offset=%s endpoint_size=%s endpoint1_offset=%s align=%s reset=%s vm0_cpus=%s vm1_cpus=%s mem_node=%s hydra_bdfs=%s,%s\n' \
+			printf 'backend_layout_ok machine=%s qemu=%s cxl=%s offset=%s size=%s align=%s hydra=%s offset=%s endpoint_size=%s endpoint1_offset=%s align=%s reset=%s mem=%s maxmem=%s smp=%s vm0_cpus=%s vm1_cpus=%s vm0_mem_node=%s vm1_mem_node=%s hydra_bdfs=%s,%s\n' \
 				"$MACHINE" "$QEMU" \
 				"$CXL_FILE" "$CXL_BACKEND_OFFSET" "$CXL_BACKEND_SIZE" "${CXL_BACKEND_ALIGN:-default}" \
 				"$HYDRA_SHM_FILE" "$HYDRA_BACKEND_OFFSET" \
 				"$HYDRA_ENDPOINT_SIZE" "$HYDRA_ENDPOINT1_OFFSET" "${HYDRA_BACKEND_ALIGN:-default}" "$BACKEND_RESET" \
-				"${VM0_HOST_CPUS:-none}" "${VM1_HOST_CPUS:-none}" "${VM_MEMORY_NODE:-none}" \
+				"$MEM" "$VM_MAXMEM" "$SMP" \
+				"${VM0_HOST_CPUS:-none}" "${VM1_HOST_CPUS:-none}" \
+				"${VM0_MEMORY_NODE:-none}" "${VM1_MEMORY_NODE:-none}" \
 				"${HYDRA0_PCI_ADDR:-auto}" "${HYDRA1_PCI_ADDR:-auto}"
 			;;
 		all)
