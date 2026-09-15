@@ -66,6 +66,16 @@ size_to_bytes() {
 	esac
 }
 
+vm_memory_arg=$MEM
+mem_bytes=$(size_to_bytes "$MEM")
+maxmem_bytes=$(size_to_bytes "$VM_MAXMEM")
+if (( maxmem_bytes < mem_bytes )); then
+	echo "VM_MAXMEM=$VM_MAXMEM is smaller than MEM=$MEM" >&2
+	exit 2
+elif (( maxmem_bytes > mem_bytes )); then
+	vm_memory_arg="$MEM,slots=1,maxmem=$VM_MAXMEM"
+fi
+
 pid_alive() {
 	local pidfile=$1
 	[[ -f "$pidfile" ]] && kill -0 "$(cat "$pidfile")" 2>/dev/null
@@ -249,7 +259,7 @@ start_vm0() {
 		-machine "$MACHINE",accel=kvm,nvdimm=on \
 		-cpu host \
 		-smp "$SMP",sockets=1,cores="$SMP",threads=1 \
-		-m "$MEM",slots=1,maxmem="$VM_MAXMEM" \
+		-m "$vm_memory_arg" \
 		-object "$cxl_backend" \
 		-device nvdimm,id=cxldev,memdev=cxlmem,label-size=16M \
 		"${hydra_ivshmem_args[@]}" \
@@ -288,7 +298,7 @@ start_vm1() {
 		-machine "$MACHINE",accel=kvm,nvdimm=on \
 		-cpu host \
 		-smp "$SMP",sockets=1,cores="$SMP",threads=1 \
-		-m "$MEM",slots=1,maxmem="$VM_MAXMEM" \
+		-m "$vm_memory_arg" \
 		-object "$cxl_backend" \
 		-device nvdimm,id=cxldev,memdev=cxlmem,label-size=16M \
 		"${hydra_ivshmem_args[@]}" \
