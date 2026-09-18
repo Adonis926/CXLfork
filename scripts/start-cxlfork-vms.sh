@@ -7,6 +7,7 @@ set -euo pipefail
 WS=${WS:-/home/xtl/cxlfork/cxlfork-repro}
 QEMU=${QEMU:-qemu-system-x86_64}
 MACHINE=${MACHINE:-q35}
+CPU_MODEL=${CPU_MODEL:-host}
 GUEST_APPEND_EXTRA=${GUEST_APPEND_EXTRA:-}
 KERNEL=${KERNEL:-$WS/kernel/build-6.6.32/arch/x86/boot/bzImage}
 CXL_FILE=${CXL_FILE:-/dev/shm/cxl_mem}       # host 上共享给 VM0/VM1 的 CXL 后端文件。
@@ -45,6 +46,13 @@ VM1_MEMORY_NODE=${VM1_MEMORY_NODE:-$VM_MEMORY_NODE}
 LOCAL_MEMORY_NODE=${LOCAL_MEMORY_NODE:-$VM_MEMORY_NODE}
 HYDRA0_PCI_ADDR=${HYDRA0_PCI_ADDR:-}
 HYDRA1_PCI_ADDR=${HYDRA1_PCI_ADDR:-}
+HYDRA_PCI_BUS=${HYDRA_PCI_BUS:-pcie.0}
+VM_PIN_VCPUS=${VM_PIN_VCPUS:-0}
+
+[[ $VM_PIN_VCPUS =~ ^[01]$ ]] || {
+	echo "VM_PIN_VCPUS must be 0 or 1" >&2
+	exit 2
+}
 
 mkdir -p "$WS/logs" "$WS/pids" "$WS/sockets"
 
@@ -201,10 +209,10 @@ fi
 hydra0_device="ivshmem-plain,id=hydra-shm0,memdev=hydra0"
 hydra1_device="ivshmem-plain,id=hydra-shm1,memdev=hydra1"
 if [[ -n "$HYDRA0_PCI_ADDR" ]]; then
-	hydra0_device+=",bus=pcie.0,addr=$HYDRA0_PCI_ADDR"
+	hydra0_device+=",bus=$HYDRA_PCI_BUS,addr=$HYDRA0_PCI_ADDR"
 fi
 if [[ -n "$HYDRA1_PCI_ADDR" ]]; then
-	hydra1_device+=",bus=pcie.0,addr=$HYDRA1_PCI_ADDR"
+	hydra1_device+=",bus=$HYDRA_PCI_BUS,addr=$HYDRA1_PCI_ADDR"
 fi
 
 hydra_ivshmem_args=(
@@ -242,6 +250,42 @@ print_affinity() {
 	[[ -z "$memory_node" ]] || echo "$name requested_memory_node=$memory_node (verify allocations with numastat -p $pid)"
 }
 
+pin_vm_vcpus() {
+	local name=$1 pidfile=$2 cpus=$3
+	local begin end count pid tid index tries
+	[[ $VM_PIN_VCPUS == 1 ]] || return 0
+	[[ $cpus =~ ^([0-9]+)-([0-9]+)$ ]] || {
+		echo "$name vCPU pinning requires one contiguous CPU range, found: $cpus" >&2
+		return 1
+	}
+	begin=${BASH_REMATCH[1]}
+	end=${BASH_REMATCH[2]}
+	count=$((end - begin + 1))
+	(( count == SMP )) || {
+		echo "$name CPU range has $count CPUs, expected SMP=$SMP" >&2
+		return 1
+	}
+	pid=$(<"$pidfile")
+	for tries in $(seq 1 100); do
+		[[ $(ps -T -p "$pid" -o comm= | grep -c '^qemu-vcpu') -eq $SMP ]] && break
+		sleep 0.05
+	done
+	[[ $(ps -T -p "$pid" -o comm= | grep -c '^qemu-vcpu') -eq $SMP ]] || {
+		echo "timed out waiting for $name vCPU threads" >&2
+		return 1
+	}
+	for ((index = 0; index < SMP; index++)); do
+		tid=$(ps -T -p "$pid" -o tid=,comm= |
+			awk -v wanted="qemu-vcpu$index" '$2 == wanted {print $1; exit}')
+		[[ -n $tid ]] || {
+			echo "missing $name qemu-vcpu$index below pid $pid" >&2
+			return 1
+		}
+		taskset -pc $((begin + index)) "$tid" >/dev/null
+	done
+	echo "$name vcpu_pinning=ok host_cpus=$cpus"
+}
+
 start_vm0() {
 	# VM0 是 checkpoint/prepare 端，挂载共享 CXL backend。
 	local pidfile=$WS/pids/vm0.pid
@@ -257,7 +301,7 @@ start_vm0() {
 	launch_qemu "$VM0_HOST_CPUS" "$VM0_MEMORY_NODE" \
 		-name vm0 \
 		-machine "$MACHINE",accel=kvm,nvdimm=on \
-		-cpu host \
+		-cpu "$CPU_MODEL" \
 		-smp "$SMP",sockets=1,cores="$SMP",threads=1 \
 		-m "$vm_memory_arg" \
 		-object "$cxl_backend" \
@@ -276,6 +320,7 @@ start_vm0() {
 		-pidfile "$pidfile" \
 		-display none \
 		-daemonize
+	pin_vm_vcpus vm0 "$pidfile" "$VM0_HOST_CPUS"
 	print_affinity vm0 "$pidfile" "$VM0_MEMORY_NODE"
 	echo "started vm0 pid=$(cat "$pidfile") ssh=localhost:$VM0_PORT hydra=$HYDRA_SHM_FILE"
 }
@@ -296,7 +341,7 @@ start_vm1() {
 	launch_qemu "$VM1_HOST_CPUS" "$VM1_MEMORY_NODE" \
 		-name vm1 \
 		-machine "$MACHINE",accel=kvm,nvdimm=on \
-		-cpu host \
+		-cpu "$CPU_MODEL" \
 		-smp "$SMP",sockets=1,cores="$SMP",threads=1 \
 		-m "$vm_memory_arg" \
 		-object "$cxl_backend" \
@@ -315,6 +360,7 @@ start_vm1() {
 		-pidfile "$pidfile" \
 		-display none \
 		-daemonize
+	pin_vm_vcpus vm1 "$pidfile" "$VM1_HOST_CPUS"
 	print_affinity vm1 "$pidfile" "$VM1_MEMORY_NODE"
 	echo "started vm1 pid=$(cat "$pidfile") ssh=localhost:$VM1_PORT control=$VM1_CONTROL_HOST:$VM1_CONTROL_PORT hydra=$HYDRA_SHM_FILE"
 }
@@ -332,7 +378,7 @@ start_localfork() {
 	launch_qemu "${LOCAL_HOST_CPUS:-}" "$LOCAL_MEMORY_NODE" \
 		-name localfork \
 		-machine "$MACHINE",accel=kvm \
-		-cpu host \
+		-cpu "$CPU_MODEL" \
 		-smp "$SMP",sockets=1,cores="$SMP",threads=1 \
 		-m "$MEM" \
 		-drive file="$WS/images/normal-localfork.qcow2",if=virtio,cache=writeback,format=qcow2 \
@@ -355,14 +401,15 @@ main() {
 	validate_backend_layout
 	case "${1:-all}" in
 		check)
-			printf 'backend_layout_ok machine=%s qemu=%s cxl=%s offset=%s size=%s align=%s hydra=%s offset=%s endpoint_size=%s endpoint1_offset=%s align=%s reset=%s mem=%s maxmem=%s smp=%s vm0_cpus=%s vm1_cpus=%s vm0_mem_node=%s vm1_mem_node=%s hydra_bdfs=%s,%s\n' \
-				"$MACHINE" "$QEMU" \
+			printf 'backend_layout_ok machine=%s qemu=%s cpu_model=%s cxl=%s offset=%s size=%s align=%s hydra=%s offset=%s endpoint_size=%s endpoint1_offset=%s align=%s reset=%s mem=%s maxmem=%s smp=%s sockets=1 cores=%s threads=1 vm0_cpus=%s vm1_cpus=%s vm0_mem_node=%s vm1_mem_node=%s vcpu_pin=%s hydra_bus=%s hydra_bdfs=%s,%s\n' \
+				"$MACHINE" "$QEMU" "$CPU_MODEL" \
 				"$CXL_FILE" "$CXL_BACKEND_OFFSET" "$CXL_BACKEND_SIZE" "${CXL_BACKEND_ALIGN:-default}" \
 				"$HYDRA_SHM_FILE" "$HYDRA_BACKEND_OFFSET" \
 				"$HYDRA_ENDPOINT_SIZE" "$HYDRA_ENDPOINT1_OFFSET" "${HYDRA_BACKEND_ALIGN:-default}" "$BACKEND_RESET" \
-				"$MEM" "$VM_MAXMEM" "$SMP" \
+				"$MEM" "$VM_MAXMEM" "$SMP" "$SMP" \
 				"${VM0_HOST_CPUS:-none}" "${VM1_HOST_CPUS:-none}" \
 				"${VM0_MEMORY_NODE:-none}" "${VM1_MEMORY_NODE:-none}" \
+				"$VM_PIN_VCPUS" "$HYDRA_PCI_BUS" \
 				"${HYDRA0_PCI_ADDR:-auto}" "${HYDRA1_PCI_ADDR:-auto}"
 			;;
 		all)
