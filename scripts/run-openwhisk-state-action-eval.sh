@@ -290,7 +290,7 @@ provision()
 	make_guest_bundle
 	if [[ ! -f $OWE_SSI_DISK ]]; then
 		log "create isolated SSI disk from $OWE_SSI_BASE_DISK"
-		cp --reflink=auto --sparse=always "$OWE_SSI_BASE_DISK" "$OWE_SSI_DISK.new"
+		cp --reflink=auto --sparse=auto "$OWE_SSI_BASE_DISK" "$OWE_SSI_DISK.new"
 		mv "$OWE_SSI_DISK.new" "$OWE_SSI_DISK"
 	fi
 	[[ $(qemu-img info --output=json "$OWE_SSI_DISK" | jq -r .format) == raw ]] ||
