@@ -1,8 +1,8 @@
 [submodule "kernel/linux-6.6.32"]
 	path = kernel/linux-6.6.32
-	url = https://github.com/qmyyxtl/cxlfork-linux-6.6.32.git
+	url = https://github.com/Adonis926/CXLfork-kernel.git
 	branch = cxlfork-spawn-real-cxl-103
 [submodule "cxlporter"]
 	path = cxlporter
-	url = https://github.com/qmyyxtl/cxlfork-cxlporter.git
+	url = https://github.com/Adonis926/CXLporter.git
 	branch = cxlfork-cold-lifecycle-eval-103
