@@ -16,18 +16,18 @@ PROFILE=${OWE_PROFILE:-$DEFAULT_PROFILE}
 # shellcheck source=/dev/null
 source "$PROFILE"
 
-HPCA_DIR=/home/xtl/start/hpca
+HPCA_DIR=$OWE_HPCA_DIR
 HPCA_KILL=$HPCA_DIR/kill-gvm.sh
 CXLFORK_START=$ROOT/scripts/start-cxlfork-vms.sh
 CXLFORK_STOP=$ROOT/scripts/stop-cxlfork-vms.sh
-DAX_ADMIN=$ROOT/scripts/real-cxl-103/dax-admin.sh
+BACKEND_HELPER=${OWE_BACKEND_HELPER:-$ROOT/scripts/cxlde-shared-backend.sh}
 PORTER=$ROOT/cxlporter
 GUEST_ROOT=/root/openwhisk-state-action-eval
 LOCK=/run/lock/openwhisk-state-action-eval.lock
 BOOT_TIMEOUT=${OWE_BOOT_TIMEOUT:-300}
 RUN_TIMEOUT=${OWE_RUN_TIMEOUT:-7200}
 MAX_ATTEMPTS=${OWE_MAX_ATTEMPTS:-3}
-SSH_KEY=/home/xtl/start/hpca-cxlfork/keys/id_ed25519
+SSH_KEY=$OWE_SSH_KEY
 declare -a ALLOWED_SYSTEMS=(cohort no-tiering starfish native-cxl native-dram cxlfork cxlfork-cold)
 if [[ -n ${OWE_SYSTEMS:-} ]]; then
 	read -r -a SYSTEMS <<<"$OWE_SYSTEMS"
@@ -112,6 +112,22 @@ ports_busy()
 	ss -lntH 2>/dev/null | awk '$4 ~ /:(2200|2201|2301|3233|3433|4444|4445|5555|7100)$/ {print}'
 }
 
+uses_ssi_systems()
+{
+	local system
+	for system in "${SYSTEMS[@]}"; do
+		[[ $system == cxlfork || $system == cxlfork-cold ]] || return 0
+	done
+	return 1
+}
+
+resolve_shared_backend()
+{
+	[[ -x $BACKEND_HELPER ]] || die "shared-backend helper is missing: $BACKEND_HELPER"
+	# The helper emits only shell-quoted CXLFORK_* exports.
+	eval "$("$BACKEND_HELPER" resolve "$OWE_SHARED_BACKEND")"
+}
+
 preflight_common()
 {
 	local command dax
@@ -120,18 +136,26 @@ preflight_common()
 		mount mountpoint nc pgrep qemu-img qemu-nbd sha256sum sshpass ss tar timeout umount; do
 		command -v "$command" >/dev/null || die "missing command: $command"
 	done
-	[[ -x $HPCA_KILL && -x $CXLFORK_START && -x $CXLFORK_STOP && -x $DAX_ADMIN ]] ||
-		die "an authoritative launcher is missing"
+	[[ -x $CXLFORK_START && -x $CXLFORK_STOP && -x $OWE_KVM_LOADER ]] ||
+		die "a CXLfork launcher is missing"
+	if uses_ssi_systems; then
+		[[ -x $HPCA_KILL ]] || die "SSI teardown launcher is missing: $HPCA_KILL"
+	fi
+	[[ -x $OWE_QEMU ]] || die "QEMU is missing: $OWE_QEMU"
+	[[ -r $OWE_KERNEL ]] || die "CXLfork kernel is missing: $OWE_KERNEL"
+	[[ -r $SSH_KEY ]] || die "guest SSH key is missing: $SSH_KEY"
 	[[ -n ${OWE_CXL_PHYS:-} && -n ${OWE_CXL_SIZE:-} ]] ||
 		die "CXLfork guest physical geometry is not configured"
-	dax=$(daxctl list -d dax0.0 2>/dev/null) || die "cannot inspect dax0.0"
-	grep -q '"mode":"devdax"' <<<"$dax" || die "dax0.0 is not devdax"
+	resolve_shared_backend
+	dax=$(daxctl list -d "$CXLFORK_DAX_NAME" 2>/dev/null) || die "cannot inspect $CXLFORK_DAX_NAME"
+	grep -q '"mode":"devdax"' <<<"$dax" || die "$CXLFORK_DAX_DEVICE is not devdax"
 	[[ -z $(qemus) ]] || { qemus >&2; die "QEMU is already active"; }
 	[[ -z $(ports_busy) ]] || { ports_busy >&2; die "an experiment port is occupied"; }
-	if fuser /dev/dax0.0 >/dev/null 2>&1; then
-		die "/dev/dax0.0 has an active holder"
+	if fuser "$CXLFORK_DAX_DEVICE" >/dev/null 2>&1; then
+		die "$CXLFORK_DAX_DEVICE has an active holder"
 	fi
-	(( $(getconf _NPROCESSORS_ONLN) >= 96 )) || die "at least 96 online host CPUs are required"
+	(( $(getconf _NPROCESSORS_ONLN) >= OWE_MIN_HOST_CPUS )) ||
+		die "at least $OWE_MIN_HOST_CPUS online host CPUs are required"
 }
 
 preflight_assets()
@@ -161,8 +185,9 @@ preflight()
 	done
 	preflight_common
 	preflight_assets
-	printf 'PREFLIGHT_OK host=%s dax=devdax systems=%s vcpus=%s\n' \
-		"$OWE_HOST" "${SYSTEMS[*]}" "$OWE_VCPUS"
+	printf 'PREFLIGHT_OK host=%s backend=%s dax=%s align=%s systems=%s vcpus=%s\n' \
+		"$OWE_HOST" "$CXLFORK_SHARED_BACKEND" "$CXLFORK_DAX_DEVICE" \
+		"$CXLFORK_DAX_ALIGN" "${SYSTEMS[*]}" "$OWE_VCPUS"
 }
 
 make_guest_bundle()
@@ -276,7 +301,7 @@ provision()
 
 	local name base
 	for name in vm0 vm1; do
-		base="/home/xtl/start/hpca-cxlfork/images/paper-${name}.qcow2"
+		base="$OWE_CXL_BASE_IMAGE_ROOT/paper-${name}.qcow2"
 		[[ -r $base ]] || die "missing CXLfork paper base: $base"
 		if [[ ! -f $OWE_CXL_WS/images/$name.qcow2 ]]; then
 			qemu-img create -q -f qcow2 -F qcow2 -b "$base" "$OWE_CXL_WS/images/$name.qcow2"
@@ -285,9 +310,9 @@ provision()
 		install_bundle_qcow2 "$OWE_CXL_WS/images/$name.qcow2" \
 			"$OWE_ROOT/staging/openwhisk-state-action-eval"
 	done
-	ln -sfn /home/xtl/start/hpca-cxlfork/cloudinit/vm0-seed-91.iso "$OWE_CXL_WS/cloudinit/vm0-seed.iso"
-	ln -sfn /home/xtl/start/hpca-cxlfork/cloudinit/vm1-seed-91.iso "$OWE_CXL_WS/cloudinit/vm1-seed.iso"
-	chown -R xtl:xtl "$OWE_ROOT"
+	ln -sfn "$OWE_CLOUDINIT_ROOT/vm0-seed-91.iso" "$OWE_CXL_WS/cloudinit/vm0-seed.iso"
+	ln -sfn "$OWE_CLOUDINIT_ROOT/vm1-seed-91.iso" "$OWE_CXL_WS/cloudinit/vm1-seed.iso"
+	chown -R "$OWE_RUNTIME_OWNER" "$OWE_ROOT"
 	log "provision complete root=$OWE_ROOT ssi_disk=$OWE_SSI_DISK cxl_ws=$OWE_CXL_WS"
 }
 
@@ -617,17 +642,18 @@ run_cxl_attempt()
 	CURRENT_ATTEMPT=$attempt; mkdir -p "$attempt"; snapshot_dmesg >"$attempt/dmesg-before.txt"
 	key_base=103000000; [[ $system == cxlfork-cold ]] && key_base=103100000
 	key=$((key_base + vcpus * 100 + rep)); cpu0="48-$((47 + half))"; cpu1="$((48 + half))-$((47 + vcpus))"
-	/home/xtl/start/hpca/load-native-kvm.sh >"$attempt/kvm-load.log" 2>&1
+	"$OWE_KVM_LOADER" >"$attempt/kvm-load.log" 2>&1
 	OWN_RUNTIME=cxl
-	env PROFILE="$OWE_REAL_CXL_PROFILE" RUNTIME_ROOT=/home/xtl/start/hpca-cxlfork \
-		CXLFORK_EXCLUSIVE_CONFIRM="$OWE_EXCLUSIVE_TOKEN" "$DAX_ADMIN" zero >"$attempt/dax-zero.log" 2>&1
-	env WS="$OWE_CXL_WS" QEMU=/home/xtl/qemu-9.0.90-clean/build/qemu-system-x86_64 \
+	"$BACKEND_HELPER" prepare "$OWE_SHARED_BACKEND" >"$attempt/backend-prepare.log" 2>&1
+	"$BACKEND_HELPER" zero "$OWE_SHARED_BACKEND" >"$attempt/dax-zero.log" 2>&1
+	resolve_shared_backend
+	env WS="$OWE_CXL_WS" QEMU="$OWE_QEMU" \
 		MACHINE='pc-q35-8.2,kernel-irqchip=split,mem-merge=off' GUEST_APPEND_EXTRA=nox2apic \
-		KERNEL=/home/xtl/start/hpca-cxlfork/kernels/bzImage-6.6.32-cxlfork-91 \
-		CXL_FILE=/dev/dax0.0 CXL_BACKEND_OFFSET=4G CXL_BACKEND_SIZE=4G CXL_BACKEND_ALIGN=2M \
-		CXL_PHYS="$OWE_CXL_PHYS" CXL_SIZE="$OWE_CXL_SIZE" HYDRA_SHM_FILE=/dev/dax0.0 \
+		KERNEL="$OWE_KERNEL" \
+		CXL_FILE="$CXLFORK_DAX_DEVICE" CXL_BACKEND_OFFSET=4G CXL_BACKEND_SIZE=4G CXL_BACKEND_ALIGN="$CXLFORK_DAX_ALIGN" \
+		CXL_PHYS="$OWE_CXL_PHYS" CXL_SIZE="$OWE_CXL_SIZE" HYDRA_SHM_FILE="$CXLFORK_DAX_DEVICE" \
 		HYDRA_SHM_SIZE=12G HYDRA_BACKEND_OFFSET=8G HYDRA_ENDPOINT_SIZE=2G \
-		HYDRA_ENDPOINT1_OFFSET=2G HYDRA_BACKEND_ALIGN=2M BACKEND_RESET=none \
+		HYDRA_ENDPOINT1_OFFSET=2G HYDRA_BACKEND_ALIGN="$CXLFORK_DAX_ALIGN" BACKEND_RESET=none \
 		MEM="$OWE_CXL_VM_MEMORY" SMP="$half" VM0_HOST_CPUS="$cpu0" VM1_HOST_CPUS="$cpu1" \
 		VM_MEMORY_NODE=1 HYDRA0_PCI_ADDR=0x2 HYDRA1_PCI_ADDR=0x3 \
 		VM0_PORT="$OWE_VM0_PORT" VM1_PORT="$OWE_VM1_PORT" VM1_CONTROL_PORT=2301 \
@@ -726,7 +752,9 @@ create_campaign()
 			"$OWE_JAR_SHA256" "$OWE_WSK_SHA256" "$OWE_WORKLOAD" "$OWE_STATE_CHECKSUM"
 		uname -a
 		lscpu
-		daxctl list -d dax0.0
+		printf 'shared_backend=%s\ndax_device=%s\ndax_align=%s\n' \
+			"$CXLFORK_SHARED_BACKEND" "$CXLFORK_DAX_DEVICE" "$CXLFORK_DAX_ALIGN"
+		daxctl list -d "$CXLFORK_DAX_NAME"
 	} >"$CAMPAIGN/manifest/environment.txt"
 	(cd "$CAMPAIGN/manifest" && sha256sum run-openwhisk-state-action-eval.sh profile.env >frozen.sha256)
 }
@@ -745,6 +773,10 @@ verify_campaign()
 		die "OWE_SEQUENTIAL_REQUESTS differs from the frozen campaign"
 	grep -qx "throughput_seconds=$OWE_THROUGHPUT_SECONDS" "$CAMPAIGN/manifest/environment.txt" ||
 		die "OWE_THROUGHPUT_SECONDS differs from the frozen campaign"
+	grep -qx "shared_backend=$CXLFORK_SHARED_BACKEND" "$CAMPAIGN/manifest/environment.txt" ||
+		die "shared backend differs from the frozen campaign"
+	grep -qx "dax_align=$CXLFORK_DAX_ALIGN" "$CAMPAIGN/manifest/environment.txt" ||
+		die "DAX alignment differs from the frozen campaign"
 	frozen=$(cat "$CAMPAIGN/manifest/vcpu-order.txt"); requested=$(printf '%s\n' "${SELECTED_VCPUS[@]}")
 	[[ $frozen == "$requested" ]] || die "requested vCPU order differs from frozen campaign"
 	frozen_systems=$(cat "$CAMPAIGN/manifest/system-order.txt")

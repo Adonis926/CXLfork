@@ -5,4 +5,4 @@
 [submodule "cxlporter"]
 	path = cxlporter
 	url = https://github.com/qmyyxtl/cxlfork-cxlporter.git
-	branch = cxlfork-paper-system-reproduction
+	branch = cxlfork-cold-lifecycle-eval-103
